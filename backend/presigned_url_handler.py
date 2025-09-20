@@ -1,6 +1,5 @@
 import json
 import boto3
-import uuid
 import os
 from botocore.exceptions import ClientError
 from typing import Dict, Any
@@ -27,7 +26,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     Returns:
     {
         "presignedUrl": "https://...",
-        "key": "videos/analysis-job-123_unique-id_video.mp4",
+        "key": "videos/analysis-job-123/original/video.mp4",
         "bucket": "bucket-name"
     }
     }
@@ -84,9 +83,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         if file_extension not in allowed_extensions:
             raise ValueError(f"File type {file_extension} not allowed. Supported types: {', '.join(allowed_extensions)}")
         
-        # Generate unique key for the video file with jobId
-        unique_id = str(uuid.uuid4())[:8]
-        s3_key = f"videos/{job_id}_{unique_id}_{filename}"
+        # Generate S3 key with jobId/original directory structure
+        s3_key = f"videos/{job_id}/original/{filename}"
         
         # Generate presigned URL for PUT operation
         presigned_url = s3_client.generate_presigned_url(

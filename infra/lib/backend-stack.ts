@@ -1,6 +1,7 @@
 import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as s3n from 'aws-cdk-lib/aws-s3-notifications';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as iam from 'aws-cdk-lib/aws-iam';
@@ -9,6 +10,7 @@ import * as path from 'path';
 export class BackendStack extends cdk.Stack {
   public readonly s3Bucket: s3.Bucket;
   public readonly presignedUrlFunction: lambda.Function;
+  public readonly s3EventProcessor: lambda.Function;
   public readonly api: apigateway.RestApi;
 
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -59,9 +61,26 @@ export class BackendStack extends cdk.Stack {
       description: 'Generate presigned URLs for S3 video uploads'
     });
 
+    // Create Lambda function for processing S3 upload events
+    this.s3EventProcessor = new lambda.Function(this, 'S3EventProcessor', {
+      runtime: lambda.Runtime.PYTHON_3_11,
+      code: lambda.Code.fromAsset(path.join(__dirname, '../../backend')),
+      handler: 's3_event_processor.lambda_handler',
+      environment: {
+        S3_BUCKET_NAME: this.s3Bucket.bucketName
+      },
+      timeout: cdk.Duration.minutes(5), // Allow more time for video processing
+      memorySize: 512, // More memory for video processing tasks
+      description: 'Process S3 upload events for video files'
+    });
+
     // Grant Lambda function permissions to generate presigned URLs for the S3 bucket
     this.s3Bucket.grantPut(this.presignedUrlFunction);
     this.s3Bucket.grantRead(this.presignedUrlFunction);
+
+    // Grant S3 event processor permissions to read from S3 bucket
+    this.s3Bucket.grantRead(this.s3EventProcessor);
+    this.s3Bucket.grantWrite(this.s3EventProcessor); // For writing processed files back to S3
 
     // Additional IAM permissions for presigned URL generation
     this.presignedUrlFunction.addToRolePolicy(
@@ -71,6 +90,24 @@ export class BackendStack extends cdk.Stack {
           's3:PutObject',
           's3:PutObjectAcl',
           's3:GetObject'
+        ],
+        resources: [
+          this.s3Bucket.bucketArn,
+          `${this.s3Bucket.bucketArn}/*`
+        ]
+      })
+    );
+
+    // Additional IAM permissions for S3 event processor
+    this.s3EventProcessor.addToRolePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          's3:GetObject',
+          's3:GetObjectMetadata',
+          's3:PutObject',
+          's3:PutObjectAcl',
+          's3:DeleteObject'
         ],
         resources: [
           this.s3Bucket.bucketArn,
@@ -168,6 +205,53 @@ export class BackendStack extends cdk.Stack {
       ]
     });
 
+    // Configure S3 bucket to send upload events to the processor Lambda
+    this.s3Bucket.addEventNotification(
+      s3.EventType.OBJECT_CREATED,
+      new s3n.LambdaDestination(this.s3EventProcessor),
+      {
+        prefix: 'videos/', // Only trigger for files in the videos/ directory
+        suffix: '.mp4'     // Only trigger for video files (add more extensions as needed)
+      }
+    );
+
+    // Also trigger for other video formats
+    this.s3Bucket.addEventNotification(
+      s3.EventType.OBJECT_CREATED,
+      new s3n.LambdaDestination(this.s3EventProcessor),
+      {
+        prefix: 'videos/',
+        suffix: '.mov'
+      }
+    );
+
+    this.s3Bucket.addEventNotification(
+      s3.EventType.OBJECT_CREATED,
+      new s3n.LambdaDestination(this.s3EventProcessor),
+      {
+        prefix: 'videos/',
+        suffix: '.avi'
+      }
+    );
+
+    this.s3Bucket.addEventNotification(
+      s3.EventType.OBJECT_CREATED,
+      new s3n.LambdaDestination(this.s3EventProcessor),
+      {
+        prefix: 'videos/',
+        suffix: '.mkv'
+      }
+    );
+
+    this.s3Bucket.addEventNotification(
+      s3.EventType.OBJECT_CREATED,
+      new s3n.LambdaDestination(this.s3EventProcessor),
+      {
+        prefix: 'videos/',
+        suffix: '.webm'
+      }
+    );
+
     // Output important values
     new cdk.CfnOutput(this, 'S3BucketName', {
       value: this.s3Bucket.bucketName,
@@ -187,6 +271,11 @@ export class BackendStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'LambdaFunctionName', {
       value: this.presignedUrlFunction.functionName,
       description: 'Name of the presigned URL Lambda function'
+    });
+
+    new cdk.CfnOutput(this, 'S3EventProcessorName', {
+      value: this.s3EventProcessor.functionName,
+      description: 'Name of the S3 event processor Lambda function'
     });
   }
 }
