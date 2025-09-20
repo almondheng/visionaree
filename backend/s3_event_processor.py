@@ -2,6 +2,10 @@ import json
 import boto3
 import subprocess
 import shlex
+import os
+import tempfile
+from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from botocore.exceptions import ClientError
 from typing import Dict, Any, List
 import logging
@@ -34,6 +38,13 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     
     try:
         logger.info(f"Received S3 event: {json.dumps(event, indent=2)}")
+        logger.info("=== S3 Event Processor - Processing Rules ===")
+        logger.info("✓ ONLY process files matching: videos/{jobId}/original/{filename}")
+        logger.info("✗ SKIP files matching: videos/{jobId}/segments/{filename}")
+        logger.info("✗ SKIP files matching: videos/{jobId}/thumbnails/{filename}")
+        logger.info("✗ SKIP files matching: videos/{jobId}/metadata/{filename}")
+        logger.info("✗ SKIP files matching: videos/{jobId}/previews/{filename}")
+        logger.info("=== End Processing Rules ===")
         
         # Process each record in the S3 event
         processed_files = []
@@ -54,24 +65,56 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             
             # Only process video files in the videos/ prefix
             if not object_key.startswith('videos/'):
-                logger.info(f"Skipping non-video file: {object_key}")
+                logger.info(f"Skipping non-video file (not in videos/ prefix): {object_key}")
                 continue
             
             # Extract job ID from the S3 key path
             # Expected format: videos/{jobId}/original/{filename}
+            # Do NOT process: videos/{jobId}/segments/{filename} or videos/{jobId}/thumbnails/{filename}
             path_parts = object_key.split('/')
             if len(path_parts) < 4:
-                logger.warning(f"Unexpected S3 key format: {object_key}")
+                logger.warning(f"Unexpected S3 key format (insufficient path parts): {object_key}")
+                logger.warning(f"Expected format: videos/{{jobId}}/original/{{filename}}, got {len(path_parts)} parts: {path_parts}")
+                continue
+            
+            # Ensure we have exactly the expected structure
+            if len(path_parts) != 4:
+                logger.warning(f"Unexpected S3 key format (too many path parts): {object_key}")
+                logger.warning(f"Expected format: videos/{{jobId}}/original/{{filename}}, got {len(path_parts)} parts: {path_parts}")
                 continue
             
             job_id = path_parts[1]
             file_category = path_parts[2]  # Should be 'original'
             filename = path_parts[3]
             
-            # Validate that this is an original file upload
-            if file_category != 'original':
-                logger.info(f"Skipping non-original file: {object_key}")
+            # Validate job_id is not empty
+            if not job_id or job_id.strip() == '':
+                logger.warning(f"Invalid job_id in S3 key: {object_key}")
                 continue
+            
+            # Validate filename is not empty and has an extension
+            if not filename or filename.strip() == '' or '.' not in filename:
+                logger.warning(f"Invalid filename in S3 key: {object_key}")
+                continue
+            
+            # CRITICAL: Only process files in the 'original' directory to avoid infinite loops
+            # This prevents reprocessing of:
+            # - segments: videos/{jobId}/segments/{filename}
+            # - thumbnails: videos/{jobId}/thumbnails/{filename}  
+            # - metadata: videos/{jobId}/metadata/{filename}
+            # - previews: videos/{jobId}/previews/{filename}
+            if file_category != 'original':
+                logger.info(f"Skipping non-original file (category: '{file_category}'): {object_key}")
+                logger.info("Only processing files in 'videos/{jobId}/original/' directory")
+                continue
+            
+            # Additional safety check: ensure we're processing a video file
+            video_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.wmv', '.m4v']
+            if not any(filename.lower().endswith(ext) for ext in video_extensions):
+                logger.info(f"Skipping non-video file (extension check): {object_key}")
+                continue
+            
+            logger.info(f"✓ Processing original video file: {filename} (job_id: {job_id})")
             
             # Process the uploaded video file
             processing_result = process_video_upload(
@@ -169,6 +212,17 @@ def process_video_upload(bucket_name: str, object_key: str, job_id: str,
         logger.info(json.dumps(metadata, indent=2))
         logger.info("=== End Metadata ===")
         
+        # Step 4: Split video into segments
+        logger.info("Step 4: Splitting video into 5-second segments...")
+        segment_result = split_video_into_segments(bucket_name, object_key, job_id)
+        
+        if segment_result.get('error'):
+            logger.error(f"Video splitting failed: {segment_result.get('error')}")
+        else:
+            logger.info(f"Successfully created {len(segment_result.get('segments', []))} video segments")
+            for segment_url in segment_result.get('segments', []):
+                logger.info(f"  Created segment: {segment_url}")
+        
         # TODO: 4. Trigger video analysis workflow
         # - Queue the video for Bedrock Nova Lite analysis
         # - Send message to SQS queue for batch processing
@@ -191,11 +245,12 @@ def process_video_upload(bucket_name: str, object_key: str, job_id: str,
         logger.info("✓ 1. File validation (basic)")
         logger.info("✓ 2. Video metadata extraction with FFmpeg")
         logger.info("✓ 3. Metadata logged to CloudWatch")
-        logger.info("TODO: 4. Generate video thumbnails")
-        logger.info("TODO: 5. Trigger video analysis workflow")
-        logger.info("TODO: 6. Generate preview clips")
-        logger.info("TODO: 7. Update job status")
-        logger.info("TODO: 8. Content validation")
+        logger.info("✓ 4. Video split into segments")
+        logger.info("TODO: 5. Generate video thumbnails")
+        logger.info("TODO: 6. Trigger video analysis workflow")
+        logger.info("TODO: 7. Generate preview clips")
+        logger.info("TODO: 8. Update job status")
+        logger.info("TODO: 9. Content validation")
         
         # Create processing result with metadata
         processing_result = {
@@ -214,10 +269,19 @@ def process_video_upload(bucket_name: str, object_key: str, job_id: str,
                 'audio_codec': metadata.get('audio_info', {}).get('codec_name', 'unknown') if metadata.get('audio_info') else 'unknown',
                 'has_error': 'error' in metadata
             },
+            'segmentation': {
+                'success': not segment_result.get('error'),
+                'total_segments': segment_result.get('total_segments', 0),
+                'uploaded_segments': segment_result.get('uploaded_segments', 0),
+                'segment_duration': segment_result.get('segment_duration', 5),
+                'segments': segment_result.get('segments', []),
+                'error': segment_result.get('error')
+            },
             'processingSteps': [
                 {'step': 'file_validation', 'status': 'completed'},
                 {'step': 'metadata_extraction', 'status': 'completed'},
                 {'step': 'metadata_logging', 'status': 'completed'},
+                {'step': 'video_segmentation', 'status': 'completed' if not segment_result.get('error') else 'failed'},
                 {'step': 'thumbnail_generation', 'status': 'pending'},
                 {'step': 'analysis_trigger', 'status': 'pending'},
                 {'step': 'preview_generation', 'status': 'pending'},
@@ -229,6 +293,8 @@ def process_video_upload(bucket_name: str, object_key: str, job_id: str,
         logger.info(f"Processing completed for {object_key}")
         if not metadata.get('error'):
             logger.info(f"Video metadata: {processing_result['metadata']['duration']:.2f}s, {processing_result['metadata']['resolution']}, {processing_result['metadata']['video_codec']}")
+        if not segment_result.get('error'):
+            logger.info(f"Video segmentation: {segment_result.get('uploaded_segments', 0)}/{segment_result.get('total_segments', 0)} segments uploaded")
         
         return processing_result
         
@@ -520,6 +586,208 @@ def parse_ffmpeg_output(metadata_text: str, object_key: str) -> Dict[str, Any]:
             'error': f'Failed to parse FFmpeg output: {str(e)}',
             'raw_output': metadata_text
         }
+
+
+def split_video_into_segments(bucket_name: str, object_key: str, job_id: str, segment_duration: int = 5) -> Dict[str, Any]:
+    """
+    Split video into segments and upload to S3.
+    
+    Args:
+        bucket_name: S3 bucket name
+        object_key: S3 object key of the original video
+        job_id: Analysis job ID
+        segment_duration: Duration of each segment in seconds (default: 5)
+        
+    Returns:
+        Dict containing segmentation results
+    """
+    try:
+        logger.info(f"Starting video segmentation for {bucket_name}/{object_key}")
+        
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Download video to temporary directory
+            filename = Path(object_key).name
+            local_video_path = os.path.join(temp_dir, filename)
+            
+            try:
+                s3_client.download_file(bucket_name, object_key, local_video_path)
+                logger.info(f"Downloaded video to {local_video_path}")
+            except Exception as e:
+                logger.error(f"Failed to download video: {str(e)}")
+                return {'error': f'Failed to download video: {str(e)}'}
+            
+            # Get video duration first
+            duration = get_video_duration_ffmpeg(local_video_path)
+            if duration <= 0:
+                logger.error("Could not determine video duration")
+                return {'error': 'Could not determine video duration'}
+            
+            num_segments = int(duration / segment_duration) + (1 if duration % segment_duration > 0 else 0)
+            logger.info(f"Video duration: {duration:.2f}s, will create {num_segments} segments of {segment_duration}s each")
+            
+            # Create segments directory
+            segments_dir = os.path.join(temp_dir, "segments")
+            os.makedirs(segments_dir, exist_ok=True)
+            
+            # Split video into segments
+            segment_paths = []
+            for i in range(num_segments):
+                start_time = i * segment_duration
+                end_time = min((i + 1) * segment_duration, duration)
+                actual_duration = end_time - start_time
+                
+                # Create filename: 0.mp4, 5.mp4, 10.mp4 (start time in seconds)
+                segment_filename = f"{int(start_time)}.mp4"
+                segment_path = os.path.join(segments_dir, segment_filename)
+                
+                # FFmpeg command to create segment
+                # Use video filter to reset timestamps and drop audio
+                ffmpeg_cmd = [
+                    FFMPEG_PATH,
+                    '-i', local_video_path,
+                    '-ss', str(start_time),
+                    '-t', str(actual_duration),
+                    '-vf', 'setpts=PTS-STARTPTS',  # Reset video timestamps to prevent black frames
+                    '-an',  # Drop audio track (no audio needed for video analysis)
+                    '-c:v', 'libx264',  # Re-encode video to ensure clean segments
+                    '-preset', 'fast',  # Fast encoding preset
+                    '-crf', '23',  # Good quality compression
+                    '-avoid_negative_ts', 'make_zero',
+                    '-y',  # Overwrite output files
+                    segment_path
+                ]
+                
+                logger.info(f"Creating segment {i+1}/{num_segments}: {segment_filename} ({start_time:.1f}s - {end_time:.1f}s)")
+                
+                result = subprocess.run(
+                    ffmpeg_cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=120  # 2 minute timeout per segment
+                )
+                
+                if result.returncode != 0:
+                    logger.error(f"FFmpeg failed for segment {segment_filename}: {result.stderr}")
+                    continue  # Skip failed segments but continue with others
+                
+                if os.path.exists(segment_path):
+                    segment_paths.append(segment_path)
+                    logger.info(f"✓ Created segment: {segment_filename}")
+                else:
+                    logger.warning(f"✗ Segment file not created: {segment_filename}")
+            
+            if not segment_paths:
+                logger.error("No segments were created successfully")
+                return {'error': 'No segments were created successfully'}
+            
+            logger.info(f"Successfully created {len(segment_paths)} segments, uploading to S3...")
+            
+            # Upload segments to S3 with concurrent uploads
+            uploaded_segments = []
+            upload_tasks = []
+            
+            for segment_path in segment_paths:
+                segment_filename = Path(segment_path).name
+                segment_key = f"videos/{job_id}/segments/{segment_filename}"
+                upload_tasks.append((segment_path, bucket_name, segment_key))
+            
+            # Use ThreadPoolExecutor for concurrent uploads
+            max_workers = min(5, len(upload_tasks))  # Limit concurrent uploads in Lambda
+            
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # Submit all upload tasks
+                future_to_task = {
+                    executor.submit(upload_segment_to_s3, task): task 
+                    for task in upload_tasks
+                }
+                
+                # Collect results as they complete
+                for future in as_completed(future_to_task):
+                    try:
+                        s3_url = future.result()
+                        uploaded_segments.append(s3_url)
+                        logger.info(f"✓ Uploaded: {Path(s3_url).name}")
+                    except Exception as e:
+                        task = future_to_task[future]
+                        logger.error(f"✗ Upload failed for {Path(task[0]).name}: {str(e)}")
+                        # Continue with other uploads even if one fails
+            
+            logger.info(f"Segmentation completed: {len(uploaded_segments)}/{len(segment_paths)} segments uploaded successfully")
+            
+            return {
+                'success': True,
+                'segments': uploaded_segments,
+                'total_segments': len(segment_paths),
+                'uploaded_segments': len(uploaded_segments),
+                'segment_duration': segment_duration,
+                'video_duration': duration
+            }
+            
+    except subprocess.TimeoutExpired:
+        logger.error(f"Video segmentation timeout for {object_key}")
+        return {'error': 'Video segmentation timeout'}
+    except Exception as e:
+        logger.error(f"Error splitting video {object_key}: {str(e)}")
+        return {'error': str(e)}
+
+
+def get_video_duration_ffmpeg(video_path: str) -> float:
+    """
+    Get video duration using FFmpeg.
+    
+    Args:
+        video_path: Local path to video file
+        
+    Returns:
+        Duration in seconds, or 0 if failed
+    """
+    try:
+        # Use FFmpeg to get duration (output goes to stderr)
+        ffmpeg_cmd = [FFMPEG_PATH, '-i', video_path, '-f', 'null', '-']
+        
+        result = subprocess.run(
+            ffmpeg_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=30
+        )
+        
+        # Parse duration from stderr output
+        import re
+        duration_match = re.search(r'Duration: (\d{2}):(\d{2}):(\d{2})\.(\d{2})', result.stderr)
+        if duration_match:
+            hours, minutes, seconds, centiseconds = map(int, duration_match.groups())
+            total_seconds = hours * 3600 + minutes * 60 + seconds + centiseconds / 100
+            return total_seconds
+        
+        logger.warning("Could not parse duration from FFmpeg output")
+        return 0.0
+        
+    except Exception as e:
+        logger.error(f"Error getting video duration: {str(e)}")
+        return 0.0
+
+
+def upload_segment_to_s3(task_args) -> str:
+    """
+    Upload a single segment to S3. Used for thread pool execution.
+    
+    Args:
+        task_args: Tuple of (segment_path, bucket_name, segment_key)
+        
+    Returns:
+        S3 URL of uploaded segment
+    """
+    segment_path, bucket_name, segment_key = task_args
+    
+    try:
+        s3_client.upload_file(segment_path, bucket_name, segment_key)
+        return f"s3://{bucket_name}/{segment_key}"
+    except Exception as e:
+        logger.error(f"Failed to upload segment {Path(segment_path).name}: {str(e)}")
+        raise
 
 
 def trigger_analysis_workflow(bucket_name: str, object_key: str, job_id: str) -> bool:
