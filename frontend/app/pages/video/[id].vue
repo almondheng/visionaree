@@ -66,7 +66,7 @@
       <Card class="mb-8 py-0">
         <CardContent class="p-0">
           <div
-            class="bg-gray-100 dark:bg-gray-800 relative overflow-hidden rounded-t-lg"
+            class="bg-gray-100 dark:bg-gray-800 relative overflow-hidden rounded-lg"
           >
             <!-- Video player for completed videos -->
             <div
