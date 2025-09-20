@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 from urllib.parse import urlparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import boto3
 from botocore.exceptions import ClientError
 
@@ -46,6 +47,18 @@ class VideoSplitter:
             print("Upload completed successfully")
         except ClientError as e:
             print(f"Error uploading to S3: {e}")
+            raise
+
+    def upload_segment_to_s3(self, args):
+        """Upload a single segment to S3. Used for thread pool execution."""
+        segment_path, bucket, segment_key = args
+        try:
+            segment_filename = Path(segment_path).name
+            print(f"Uploading {segment_filename} to s3://{bucket}/{segment_key}")
+            self.s3_client.upload_file(segment_path, bucket, segment_key)
+            return f"s3://{bucket}/{segment_key}"
+        except ClientError as e:
+            print(f"Error uploading {segment_filename} to S3: {e}")
             raise
 
     def get_video_duration(self, video_path):
@@ -169,17 +182,37 @@ class VideoSplitter:
                 local_video_path, segments_dir, segment_duration
             )
 
-            # Upload segments back to S3
-            uploaded_segments = []
+            # Upload segments back to S3 using thread pool for concurrent uploads
+            print(f"\nUploading {len(segment_paths)} segments to S3 concurrently...")
+            upload_tasks = []
             for segment_path in segment_paths:
                 segment_filename = Path(segment_path).name
                 segment_key = f"{output_prefix}/{segment_filename}"
+                upload_tasks.append((segment_path, bucket, segment_key))
 
-                self.upload_to_s3(segment_path, bucket, segment_key)
-                uploaded_segments.append(f"s3://{bucket}/{segment_key}")
+            uploaded_segments = []
+            max_workers = min(10, len(segment_paths))  # Limit concurrent uploads
 
-            print(f"\nSuccessfully created {len(uploaded_segments)} segments:")
-            for segment_url in uploaded_segments:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # Submit all upload tasks
+                future_to_task = {
+                    executor.submit(self.upload_segment_to_s3, task): task
+                    for task in upload_tasks
+                }
+
+                # Collect results as they complete
+                for future in as_completed(future_to_task):
+                    try:
+                        s3_url = future.result()
+                        uploaded_segments.append(s3_url)
+                        print(f"✓ Upload completed: {Path(s3_url).name}")
+                    except Exception as e:
+                        task = future_to_task[future]
+                        print(f"✗ Upload failed for {Path(task[0]).name}: {e}")
+                        raise
+
+            print(f"\nSuccessfully uploaded {len(uploaded_segments)} segments:")
+            for segment_url in sorted(uploaded_segments):
                 print(f"  {segment_url}")
 
             return uploaded_segments
