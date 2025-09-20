@@ -69,9 +69,17 @@ export class BackendStack extends cdk.Stack {
       environment: {
         S3_BUCKET_NAME: this.s3Bucket.bucketName
       },
-      timeout: cdk.Duration.minutes(5), // Allow more time for video processing
-      memorySize: 512, // More memory for video processing tasks
-      description: 'Process S3 upload events for video files'
+      timeout: cdk.Duration.minutes(10), // Increased timeout for FFmpeg processing
+      memorySize: 2048, // Increased memory for video processing with FFmpeg
+      description: 'Process S3 upload events for video files using FFmpeg',
+      layers: [
+        // FFmpeg Lambda layer for video processing
+        lambda.LayerVersion.fromLayerVersionArn(
+          this,
+          'FFmpegLayer',
+          'arn:aws:lambda:us-east-1:319237335445:layer:ffmpeg:1'
+        )
+      ]
     });
 
     // Grant Lambda function permissions to generate presigned URLs for the S3 bucket
