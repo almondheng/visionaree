@@ -95,9 +95,11 @@ class VideoSplitter:
 
             # Get video duration to calculate number of segments
             total_duration = self.get_video_duration(input_path)
-            num_segments = int(total_duration / segment_duration) + (
-                1 if total_duration % segment_duration > 0 else 0
-            )
+
+            # Calculate segments properly
+            num_segments = int(total_duration / segment_duration)
+            if total_duration % segment_duration > 0:
+                num_segments += 1
 
             print(
                 f"Splitting video into {num_segments} segments of {segment_duration} seconds each"
@@ -107,7 +109,19 @@ class VideoSplitter:
             segment_paths = []
             for i in range(num_segments):
                 start_time = i * segment_duration
-                end_time = min((i + 1) * segment_duration, total_duration)
+
+                # For the last segment, go to the end of the video
+                if i == num_segments - 1:
+                    end_time = total_duration
+                else:
+                    end_time = (i + 1) * segment_duration
+
+                actual_duration = end_time - start_time
+
+                # Skip segments that are too short (less than 0.5 seconds)
+                if actual_duration < 0.5:
+                    print(f"Skipping segment {i+1} (too short: {actual_duration:.2f}s)")
+                    continue
 
                 # Create simple seconds-based filename
                 # Format: 0.mp4, 5.mp4, 10.mp4 (start time in seconds, no padding)
@@ -121,9 +135,16 @@ class VideoSplitter:
                     "-ss",
                     str(start_time),
                     "-t",
-                    str(end_time - start_time),
-                    "-c",
-                    "copy",  # Copy without re-encoding for speed
+                    str(actual_duration),
+                    "-vf",
+                    "setpts=PTS-STARTPTS",  # Reset video timestamps to prevent black frames
+                    "-an",  # Drop audio track (no audio needed for video analysis)
+                    "-c:v",
+                    "libx264",  # Re-encode video to ensure clean segments
+                    "-preset",
+                    "fast",  # Fast encoding preset
+                    "-crf",
+                    "23",  # Good quality compression
                     "-avoid_negative_ts",
                     "make_zero",
                     "-y",  # Overwrite output files
