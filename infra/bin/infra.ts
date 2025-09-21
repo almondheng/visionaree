@@ -16,9 +16,9 @@ const backendStack = new BackendStack(app, 'BackendStack', {
 });
 
 // Deploy frontend stack
-// const frontendStack = new FrontendStack(app, 'FrontendStack', {
-//   env: env
-// });
+const frontendStack = new FrontendStack(app, 'FrontendStack', {
+  env: env
+});
 
 // Add dependency - frontend should be deployed after backend if needed
 // frontendStack.addDependency(backendStack);
