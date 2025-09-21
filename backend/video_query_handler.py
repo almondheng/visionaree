@@ -64,9 +64,16 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         path_parameters = event.get("pathParameters", {})
         job_id = path_parameters.get("jobId") if path_parameters else None
 
-        # Extract query from query string parameters
-        params = event.get("queryStringParameters", {})
-        query = params.get("query")
+        # Extract query from request body
+        body = event.get("body")
+        if body:
+            try:
+                body_data = json.loads(body)
+                query = body_data.get("query")
+            except json.JSONDecodeError:
+                query = None
+        else:
+            query = None
 
         if not job_id:
             return {
@@ -96,7 +103,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 },
                 "body": json.dumps(
                     {
-                        "error": "Missing query in query parameters",
+                        "error": "Missing query in request body",
                         "message": "Query is required to get video insights",
                     }
                 ),
@@ -317,7 +324,7 @@ Your task is to:
 2. Provide a concise summary of insights based on the relevant segments
 3. Return the results in the specified JSON format
 
-Return your response as a JSON object with this exact structure:
+Return your response as a JSON with this exact structure:
 {
     "relevant_segments": [
         {
@@ -363,7 +370,8 @@ def filter_segments_with_nova_pro(
 Video Segments:
 {json.dumps(segments_context, indent=2)}
 
-Please analyze these segments and provide relevant results based on the query."""
+Please analyze these segments and provide relevant results based on the query.
+Return only the JSON response as specified in the system prompt, no extra text."""
 
         # Prepare the request for Nova Pro
         request_body = {
@@ -386,6 +394,7 @@ Please analyze these segments and provide relevant results based on the query.""
 
         # Parse the response
         response_body = json.loads(response["body"].read())
+        logger.info(f"Nova Pro response: {json.dumps(response_body, indent=2)}")
 
         # Extract the content from the response (Nova Pro format)
         if "output" in response_body and "message" in response_body["output"]:

@@ -25,6 +25,9 @@ s3_client = boto3.client('s3')
 # FFmpeg path in Lambda layer
 FFMPEG_PATH = '/opt/bin/ffmpeg'
 
+# Get bucket names from environment variables
+SEGMENTS_BUCKET_NAME = os.environ.get('SEGMENTS_BUCKET_NAME')
+
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
@@ -258,8 +261,8 @@ def process_video_upload(bucket_name: str, object_key: str, job_id: str,
                 }
             })
         
-        # Step 4: Split video into segments
-        logger.info("Step 4: Splitting video into 5-second segments...")
+        # Step 4: Split video into segments using FFmpeg's native segmentation
+        logger.info("Step 4: Splitting video into segments using FFmpeg's native segmentation...")
         segment_result = split_video_into_segments(bucket_name, object_key, job_id)
         
         if segment_result.get('error'):
@@ -269,9 +272,6 @@ def process_video_upload(bucket_name: str, object_key: str, job_id: str,
             })
         else:
             logger.info(f"Successfully created {len(segment_result.get('segments', []))} video segments")
-            for segment_url in segment_result.get('segments', []):
-                logger.info(f"  Created segment: {segment_url}")
-            
             # Update job status with segment count
             update_job_status_record(job_id, upload_timestamp, 'pending', {
                 'totalSegments': len(segment_result.get('segments', [])),
@@ -702,16 +702,16 @@ def parse_ffmpeg_output(metadata_text: str, object_key: str) -> Dict[str, Any]:
 
 def split_video_into_segments(bucket_name: str, object_key: str, job_id: str, segment_duration: int = 5) -> Dict[str, Any]:
     """
-    Split video into segments and upload to S3.
+    Split video into segments using FFmpeg's native segmentation and upload to S3 segments bucket.
     
     Args:
-        bucket_name: S3 bucket name
+        bucket_name: S3 bucket name containing the original video
         object_key: S3 object key of the original video
         job_id: Analysis job ID
         segment_duration: Duration of each segment in seconds (default: 5)
         
     Returns:
-        Dict containing segmentation results
+        Dict containing segmentation results with segments uploaded to the dedicated segments bucket
     """
     try:
         logger.info(f"Starting video segmentation for {bucket_name}/{object_key}")
@@ -734,75 +734,99 @@ def split_video_into_segments(bucket_name: str, object_key: str, job_id: str, se
                 logger.error("Could not determine video duration")
                 return {'error': 'Could not determine video duration'}
             
+            # Calculate expected number of segments
             num_segments = int(duration / segment_duration) + (1 if duration % segment_duration > 0 else 0)
-            logger.info(f"Video duration: {duration:.2f}s, will create {num_segments} segments of {segment_duration}s each")
+            logger.info(f"Video duration: {duration:.2f}s, expecting ~{num_segments} segments of {segment_duration}s each")
             
             # Create segments directory
             segments_dir = os.path.join(temp_dir, "segments")
             os.makedirs(segments_dir, exist_ok=True)
             
-            # Split video into segments
-            segment_paths = []
-            for i in range(num_segments):
-                start_time = i * segment_duration
-                end_time = min((i + 1) * segment_duration, duration)
-                actual_duration = end_time - start_time
-                
-                # Create filename: 0.mp4, 5.mp4, 10.mp4 (start time in seconds)
-                segment_filename = f"{int(start_time)}.mp4"
-                segment_path = os.path.join(segments_dir, segment_filename)
-                
-                # FFmpeg command to create segment
-                # Use video filter to reset timestamps and drop audio
-                ffmpeg_cmd = [
-                    FFMPEG_PATH,
-                    '-i', local_video_path,
-                    '-ss', str(start_time),
-                    '-t', str(actual_duration),
-                    '-vf', 'setpts=PTS-STARTPTS',  # Reset video timestamps to prevent black frames
-                    '-an',  # Drop audio track (no audio needed for video analysis)
-                    '-c:v', 'libx264',  # Re-encode video to ensure clean segments
-                    '-preset', 'fast',  # Fast encoding preset
-                    '-crf', '23',  # Good quality compression
-                    '-avoid_negative_ts', 'make_zero',
-                    '-y',  # Overwrite output files
-                    segment_path
-                ]
-                
-                logger.info(f"Creating segment {i+1}/{num_segments}: {segment_filename} ({start_time:.1f}s - {end_time:.1f}s)")
-                
-                result = subprocess.run(
-                    ffmpeg_cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    timeout=120  # 2 minute timeout per segment
-                )
-                
-                if result.returncode != 0:
-                    logger.error(f"FFmpeg failed for segment {segment_filename}: {result.stderr}")
-                    continue  # Skip failed segments but continue with others
-                
-                if os.path.exists(segment_path):
-                    segment_paths.append(segment_path)
-                    logger.info(f"✓ Created segment: {segment_filename}")
-                else:
-                    logger.warning(f"✗ Segment file not created: {segment_filename}")
+            # Use FFmpeg's segment muxer for efficient video splitting
+            segment_pattern = os.path.join(segments_dir, "%d.mp4")
             
-            if not segment_paths:
-                logger.error("No segments were created successfully")
-                return {'error': 'No segments were created successfully'}
+            # FFmpeg command using segment muxer with optimized settings
+            ffmpeg_cmd = [
+                FFMPEG_PATH,
+                '-i', local_video_path,
+                '-c:v', 'libx264',  # Video codec
+                '-preset', 'ultrafast',  # Fastest encoding preset for Lambda
+                '-crf', '23',  # Good quality compression
+                '-g', '30',  # GOP size for consistent keyframes
+                '-keyint_min', '30',  # Minimum keyframe interval
+                '-sc_threshold', '0',  # Disable scene change detection
+                '-f', 'segment',  # Use segment muxer
+                '-segment_time', str(segment_duration),  # Segment duration
+                '-reset_timestamps', '1',  # Reset timestamps for each segment
+                '-movflags', '+faststart',  # Move metadata to beginning for faster loading
+                '-an',  # Remove audio (not needed for video analysis)
+                '-y',  # Overwrite output files
+                segment_pattern
+            ]
             
-            logger.info(f"Successfully created {len(segment_paths)} segments, uploading to S3...")
+            logger.info(f"Running FFmpeg segmentation: {' '.join(ffmpeg_cmd)}")
             
-            # Upload segments to S3 with concurrent uploads
+            # Run FFmpeg segmentation
+            result = subprocess.run(
+                ffmpeg_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=300  # 5 minute timeout for entire segmentation
+            )
+            
+            if result.returncode != 0:
+                logger.error(f"FFmpeg segmentation failed: {result.stderr}")
+                return {'error': f'FFmpeg segmentation failed: {result.stderr}'}
+            
+            # Debug: List all files created in segments directory
+            try:
+                all_files = os.listdir(segments_dir)
+                logger.info(f"Files in segments directory after FFmpeg: {all_files}")
+            except Exception as e:
+                logger.error(f"Could not list segments directory: {str(e)}")
+            
+            # Find all created segment files
+            segment_files = []
+            for file in os.listdir(segments_dir):
+                if file.endswith('.mp4') and file[:-4].isdigit():
+                    segment_files.append(os.path.join(segments_dir, file))
+            
+            # Sort by segment number
+            segment_files.sort(key=lambda x: int(Path(x).stem))
+            
+            if not segment_files:
+                logger.error("No segments were created by FFmpeg")
+                return {'error': 'No segments were created by FFmpeg'}
+            
+            logger.info(f"FFmpeg created {len(segment_files)} segments: {[Path(f).name for f in segment_files]}")
+            
+            logger.info(f"Successfully created {len(segment_files)} segments, uploading to S3...")
+            
+            # Validate all segment files exist before uploading
+            missing_files = []
+            for segment_path in segment_files:
+                if not os.path.exists(segment_path):
+                    missing_files.append(Path(segment_path).name)
+            
+            if missing_files:
+                logger.error(f"Missing segment files before upload: {missing_files}")
+                return {'error': f'Missing segment files: {missing_files}'}
+            
+            # Upload segments to S3 segments bucket with concurrent uploads
             uploaded_segments = []
             upload_tasks = []
             
-            for segment_path in segment_paths:
+            # Get segments bucket name from environment
+            segments_bucket = SEGMENTS_BUCKET_NAME
+            if not segments_bucket:
+                logger.error("SEGMENTS_BUCKET_NAME environment variable not set")
+                return {'error': 'Segments bucket not configured'}
+            
+            for segment_path in segment_files:
                 segment_filename = Path(segment_path).name
                 segment_key = f"videos/{job_id}/segments/{segment_filename}"
-                upload_tasks.append((segment_path, bucket_name, segment_key))
+                upload_tasks.append((segment_path, segments_bucket, segment_key))
             
             # Use ThreadPoolExecutor for concurrent uploads
             max_workers = min(5, len(upload_tasks))  # Limit concurrent uploads in Lambda
@@ -825,12 +849,12 @@ def split_video_into_segments(bucket_name: str, object_key: str, job_id: str, se
                         logger.error(f"✗ Upload failed for {Path(task[0]).name}: {str(e)}")
                         # Continue with other uploads even if one fails
             
-            logger.info(f"Segmentation completed: {len(uploaded_segments)}/{len(segment_paths)} segments uploaded successfully")
+            logger.info(f"Segmentation completed: {len(uploaded_segments)}/{len(segment_files)} segments uploaded successfully")
             
             return {
                 'success': True,
                 'segments': uploaded_segments,
-                'total_segments': len(segment_paths),
+                'total_segments': len(segment_files),
                 'uploaded_segments': len(uploaded_segments),
                 'segment_duration': segment_duration,
                 'video_duration': duration
@@ -895,6 +919,14 @@ def upload_segment_to_s3(task_args) -> str:
     segment_path, bucket_name, segment_key = task_args
     
     try:
+        # Verify file exists before attempting upload
+        if not os.path.exists(segment_path):
+            raise FileNotFoundError(f"Segment file does not exist: {segment_path}")
+        
+        # Log file size for debugging
+        file_size = os.path.getsize(segment_path)
+        logger.info(f"Uploading {Path(segment_path).name} ({file_size} bytes) to S3")
+        
         s3_client.upload_file(segment_path, bucket_name, segment_key)
         return f"s3://{bucket_name}/{segment_key}"
     except Exception as e:
@@ -917,14 +949,16 @@ def summarize_video_segments(job_id: str, uploaded_segments: List[str], segment_
     try:
         logger.info(f"Starting video summarization for {len(uploaded_segments)} segments")
         
-        # Extract start times from segment URLs and create mapping
-        # URL format: s3://bucket/videos/{job_id}/segments/{start_time}.mp4
+        # Extract segment indices from URLs and create mapping with calculated start times
+        # URL format: s3://bucket/videos/{job_id}/segments/{segment_index}.mp4 (0.mp4, 1.mp4, 2.mp4, etc.)
         segment_mapping = {}  # start_time -> s3_uri
         for segment_url in uploaded_segments:
             try:
-                # Extract start time from filename
-                filename = Path(segment_url).name  # e.g., "10.mp4"
-                start_time = int(filename.split('.')[0])  # e.g., 10
+                # Extract segment index from filename
+                filename = Path(segment_url).name  # e.g., "2.mp4"
+                segment_index = int(filename.split('.')[0])  # e.g., 2
+                # Calculate start time from segment index, file name starts from 1
+                start_time = (segment_index - 1) * segment_duration  # e.g. second file (2 - 1) * 5 = 5
                 segment_mapping[start_time] = segment_url
             except (ValueError, IndexError) as e:
                 logger.warning(f"Could not parse start time from segment URL {segment_url}: {str(e)}")
@@ -947,7 +981,7 @@ def summarize_video_segments(job_id: str, uploaded_segments: List[str], segment_
         
         # Process segments concurrently (but limit concurrency for Lambda)
         results = []
-        max_workers = min(3, len(segment_times))  # Conservative limit for Bedrock API
+        max_workers = min(2, len(segment_times))  # Limit concurrent Bedrock requests to 2
         
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             # Submit all summarization tasks

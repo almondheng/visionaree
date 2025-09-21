@@ -10,6 +10,7 @@ import * as path from 'path';
 
 export class BackendStack extends cdk.Stack {
   public readonly s3Bucket: s3.Bucket;
+  public readonly segmentsBucket: s3.Bucket;
   public readonly presignedUrlFunction: lambda.Function;
   public readonly s3EventProcessor: lambda.Function;
   public readonly videoQueryHandler: lambda.Function;
@@ -47,6 +48,38 @@ export class BackendStack extends cdk.Stack {
           id: 'DeleteOldVideos',
           enabled: true,
           expiration: cdk.Duration.days(30), // Auto-delete videos after 30 days
+          abortIncompleteMultipartUploadAfter: cdk.Duration.days(1)
+        }
+      ]
+    });
+
+    // Create S3 bucket for video segments
+    this.segmentsBucket = new s3.Bucket(this, 'VisionareeSegmentsBucket', {
+      bucketName: `visionaree-segments-${this.account}-${this.region}`,
+      removalPolicy: cdk.RemovalPolicy.RETAIN, // Keep bucket on stack deletion
+      cors: [
+        {
+          allowedMethods: [
+            s3.HttpMethods.GET,
+            s3.HttpMethods.PUT,
+            s3.HttpMethods.POST,
+            s3.HttpMethods.DELETE,
+            s3.HttpMethods.HEAD
+          ],
+          allowedOrigins: ['*'], // Configure for your domain in production
+          allowedHeaders: ['*'],
+          exposedHeaders: ['ETag'],
+          maxAge: 3000
+        }
+      ],
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      versioned: false,
+      lifecycleRules: [
+        {
+          id: 'DeleteOldSegments',
+          enabled: true,
+          expiration: cdk.Duration.days(7), // Auto-delete segments after 7 days (shorter than original videos)
           abortIncompleteMultipartUploadAfter: cdk.Duration.days(1)
         }
       ]
@@ -120,11 +153,13 @@ export class BackendStack extends cdk.Stack {
       handler: 's3_event_processor.lambda_handler',
       environment: {
         S3_BUCKET_NAME: this.s3Bucket.bucketName,
+        SEGMENTS_BUCKET_NAME: this.segmentsBucket.bucketName,
         DYNAMODB_TABLE_NAME: this.videoAnalysisTable.tableName,
         JOB_STATUS_TABLE_NAME: this.jobStatusTable.tableName
       },
-      timeout: cdk.Duration.minutes(10), // Increased timeout for FFmpeg processing
+      timeout: cdk.Duration.minutes(15), // Increased timeout for FFmpeg processing
       memorySize: 2048, // Increased memory for video processing with FFmpeg
+      ephemeralStorageSize: cdk.Size.gibibytes(5), // Increase /tmp storage to 2 GiB
       description: 'Process S3 upload events for video files using FFmpeg',
       layers: [
         // FFmpeg Lambda layer for video processing
@@ -157,6 +192,9 @@ export class BackendStack extends cdk.Stack {
     // Grant S3 event processor permissions to read from S3 bucket
     this.s3Bucket.grantRead(this.s3EventProcessor);
     this.s3Bucket.grantWrite(this.s3EventProcessor); // For writing processed files back to S3
+
+    // Grant S3 event processor permissions to write to segments bucket
+    this.segmentsBucket.grantWrite(this.s3EventProcessor);
 
     // Grant S3 event processor permissions to write to DynamoDB table
     this.videoAnalysisTable.grantWriteData(this.s3EventProcessor);
@@ -197,7 +235,9 @@ export class BackendStack extends cdk.Stack {
         ],
         resources: [
           this.s3Bucket.bucketArn,
-          `${this.s3Bucket.bucketArn}/*`
+          `${this.s3Bucket.bucketArn}/*`,
+          this.segmentsBucket.bucketArn,
+          `${this.segmentsBucket.bucketArn}/*`
         ]
       })
     );
@@ -208,6 +248,17 @@ export class BackendStack extends cdk.Stack {
         effect: iam.Effect.ALLOW,
         actions: [
           'bedrock:*'
+        ],
+        resources: ["*"]
+      })
+    );
+
+    // Grant video query handler permissions to invoke Bedrock models
+    this.videoQueryHandler.addToRolePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          'bedrock:InvokeModel'
         ],
         resources: ["*"]
       })
@@ -391,6 +442,11 @@ export class BackendStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'S3BucketName', {
       value: this.s3Bucket.bucketName,
       description: 'Name of the S3 bucket for video uploads'
+    });
+
+    new cdk.CfnOutput(this, 'SegmentsBucketName', {
+      value: this.segmentsBucket.bucketName,
+      description: 'Name of the S3 bucket for video segments'
     });
 
     new cdk.CfnOutput(this, 'ApiGatewayUrl', {
