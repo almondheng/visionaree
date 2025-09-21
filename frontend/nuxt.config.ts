@@ -2,6 +2,15 @@
 export default defineNuxtConfig({
   compatibilityDate: "2025-07-15",
   devtools: { enabled: true },
+  // Enable static site generation
+  nitro: {
+    prerender: {
+      routes: ['/'],
+      crawlLinks: true
+    }
+  },
+  // Configure for static hosting
+  ssr: true, // Keep SSR for pre-rendering
   modules: [
     "@nuxtjs/tailwindcss",
     "@vueuse/nuxt",

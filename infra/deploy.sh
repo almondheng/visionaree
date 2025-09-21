@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# Visionaree Backend Deployment Script
-# This script deploys the CDK stack for the video upload API
+# Visionaree Full Stack Deployment Script
+# This script deploys both frontend and backend CDK stacks
 
 set -e
 
-echo "🚀 Deploying Visionaree Backend Infrastructure..."
+echo "🚀 Deploying Visionaree Full Stack Infrastructure..."
 
 # Check if we're in the correct directory
 if [ ! -f "cdk.json" ]; then
@@ -19,13 +19,24 @@ if ! aws sts get-caller-identity > /dev/null 2>&1; then
     exit 1
 fi
 
-# Install dependencies if node_modules doesn't exist
+# Install CDK dependencies if node_modules doesn't exist
 if [ ! -d "node_modules" ]; then
     echo "📦 Installing CDK dependencies..."
     npm install
 fi
 
-# Build the TypeScript code
+# Build the frontend first
+echo "🏗️  Building frontend..."
+cd ../frontend
+if [ ! -d "node_modules" ]; then
+    echo "📦 Installing frontend dependencies..."
+    pnpm install
+fi
+echo "🔨 Generating static frontend..."
+pnpm generate
+cd ../infra
+
+# Build the TypeScript CDK code
 echo "🔨 Building CDK code..."
 npm run build
 
@@ -38,11 +49,15 @@ else
     echo "✅ CDK already bootstrapped"
 fi
 
-# Deploy the stack
+# Deploy the backend stack first
 echo "🚀 Deploying backend stack..."
 npx cdk deploy VisionareeBackendStack --require-approval never
 
-# Get outputs
+# Deploy the frontend stack
+echo "🚀 Deploying frontend stack..."
+npx cdk deploy VisionareeFrontendStack --require-approval never
+
+# Get outputs from both stacks
 echo "📋 Getting stack outputs..."
 API_URL=$(aws cloudformation describe-stacks \
     --stack-name VisionareeBackendStack \
@@ -54,18 +69,31 @@ BUCKET_NAME=$(aws cloudformation describe-stacks \
     --query 'Stacks[0].Outputs[?OutputKey==`S3BucketName`].OutputValue' \
     --output text)
 
+WEBSITE_URL=$(aws cloudformation describe-stacks \
+    --stack-name VisionareeFrontendStack \
+    --query 'Stacks[0].Outputs[?OutputKey==`WebsiteUrl`].OutputValue' \
+    --output text)
+
+CLOUDFRONT_DOMAIN=$(aws cloudformation describe-stacks \
+    --stack-name VisionareeFrontendStack \
+    --query 'Stacks[0].Outputs[?OutputKey==`DistributionDomainName`].OutputValue' \
+    --output text)
+
 echo ""
 echo "✅ Deployment completed successfully!"
 echo ""
 echo "📊 Stack Information:"
-echo "  API Gateway URL: $API_URL"
-echo "  S3 Bucket Name: $BUCKET_NAME"
-echo "  Presigned URL Endpoint: ${API_URL}presigned-url"
-echo "  Health Check Endpoint: ${API_URL}health"
+echo "  🌐 Frontend Website URL: $WEBSITE_URL"
+echo "  ☁️  CloudFront Domain: $CLOUDFRONT_DOMAIN"
+echo "  🔗 API Gateway URL: $API_URL"
+echo "  📦 S3 Video Bucket: $BUCKET_NAME"
+echo "  🔗 Presigned URL Endpoint: ${API_URL}presigned-url"
+echo "  ❤️  Health Check Endpoint: ${API_URL}health"
 echo ""
-echo "🧪 Test the API:"
-echo "  curl $API_URL/health"
+echo "🧪 Test the deployment:"
+echo "  Frontend: $WEBSITE_URL"
+echo "  API Health: curl $API_URL/health"
 echo ""
-echo "📝 Update your frontend configuration with:"
+echo "📝 Frontend environment variables:"
 echo "  API_BASE_URL=$API_URL"
 echo "  S3_BUCKET_NAME=$BUCKET_NAME"
