@@ -144,28 +144,30 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     ),
                 }
 
-            # Update the response with AI-filtered results
-            segments_result.update(
-                {
-                    "query": query,
-                    "ai_analysis": ai_result,
-                }
-            )
+            # Update the response with AI-filtered results only
+            response = {
+                "jobId": job_id,
+                "status": "success",
+                "query": query,
+                "jobInfo": segments_result.get("jobInfo", {}),
+                "ai_analysis": ai_result,
+            }
 
         else:
             logger.warning(
                 f"No segments available for query processing: {segments_result.get('status')}"
             )
-            segments_result.update(
-                {
-                    "query": query,
-                    "ai_analysis": {
-                        "status": "no_segments",
-                        "insights": "No segments available for analysis",
-                        "total_relevant_segments": 0,
-                    },
-                }
-            )
+            response = {
+                "jobId": job_id,
+                "status": segments_result.get("status", "error"),
+                "query": query,
+                "jobInfo": segments_result.get("jobInfo", {}),
+                "ai_analysis": {
+                    "status": "no_segments",
+                    "insights": "No segments available for analysis",
+                    "total_relevant_segments": 0,
+                },
+            }
 
         return {
             "statusCode": 200,
@@ -175,7 +177,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 "Access-Control-Allow-Headers": "Content-Type,Authorization",
                 "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
             },
-            "body": json.dumps(segments_result, indent=2, cls=DecimalEncoder),
+            "body": json.dumps(response, indent=2, cls=DecimalEncoder),
         }
 
     except Exception as e:
