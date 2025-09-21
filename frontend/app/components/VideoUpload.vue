@@ -74,167 +74,169 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
-import { toast } from "vue-sonner";
-import { Button } from "~/components/ui/button";
+import { ref } from 'vue'
+import { toast } from 'vue-sonner'
+import { Button } from '~/components/ui/button'
 
 interface Props {
-  onUploadSuccess?: (file: File) => void;
-  onUploadError?: (error: string) => void;
+  onUploadSuccess?: (file: File) => void
+  onUploadError?: (error: string) => void
 }
 
-const props = defineProps<Props>();
+const props = defineProps<Props>()
 
-const fileInput = ref<HTMLInputElement>();
-const isUploading = ref(false);
-const uploadProgress = ref(0);
-const isDragOver = ref(false);
+const fileInput = ref<HTMLInputElement>()
+const isUploading = ref(false)
+const uploadProgress = ref(0)
+const isDragOver = ref(false)
 
-const MAX_FILE_SIZE = 1024 * 1024 * 1024; // 1GB in bytes
+const MAX_FILE_SIZE = 1024 * 1024 * 1024 // 1GB in bytes
 
 const triggerFileSelect = () => {
-  fileInput.value?.click();
-};
+  fileInput.value?.click()
+}
 
 const validateFile = (file: File): string | null => {
   // Check file size
   if (file.size > MAX_FILE_SIZE) {
     return `File size exceeds 1GB limit. Current size: ${formatFileSize(
       file.size
-    )}`;
+    )}`
   }
 
   // Check file type
-  if (!file.type.startsWith("video/")) {
-    return "Please select a valid video file";
+  if (!file.type.startsWith('video/')) {
+    return 'Please select a valid video file'
   }
 
-  return null;
-};
+  return null
+}
 
 const formatFileSize = (bytes: number): string => {
-  if (bytes === 0) return "0 Bytes";
-  const k = 1024;
-  const sizes = ["Bytes", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
-};
+  if (bytes === 0) return '0 Bytes'
+  const k = 1024
+  const sizes = ['Bytes', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+}
 
 const handleFileSelect = async (event: Event) => {
-  const target = event.target as HTMLInputElement;
-  const file = target.files?.[0];
+  const target = event.target as HTMLInputElement
+  const file = target.files?.[0]
 
-  if (!file) return;
+  if (!file) return
 
   // Validate file
-  const validationError = validateFile(file);
+  const validationError = validateFile(file)
   if (validationError) {
-    toast(validationError);
-    target.value = ""; // Clear the input
-    return;
+    toast(validationError)
+    target.value = '' // Clear the input
+    return
   }
 
   try {
-    isUploading.value = true;
-    uploadProgress.value = 0;
+    isUploading.value = true
+    uploadProgress.value = 0
 
-    // Simulate upload progress
+    toast(`Starting upload of ${file.name}...`)
+
+    // Simulate progress for UI feedback while processing happens in background
     const progressInterval = setInterval(() => {
-      uploadProgress.value += Math.random() * 20;
+      uploadProgress.value += Math.random() * 20
       if (uploadProgress.value >= 90) {
-        clearInterval(progressInterval);
+        clearInterval(progressInterval)
       }
-    }, 200);
+    }, 200)
 
-    // Simulate processing delay
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    // Call success callback - this will trigger the VideoProcessingService
+    props.onUploadSuccess?.(file)
 
-    uploadProgress.value = 100;
-    clearInterval(progressInterval);
-
-    // Call success callback
-    props.onUploadSuccess?.(file);
+    // Complete the progress bar
+    clearInterval(progressInterval)
+    uploadProgress.value = 100
 
     // Reset form
-    target.value = "";
+    target.value = ''
   } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : "Upload failed";
-    toast(errorMessage);
-    props.onUploadError?.(errorMessage);
+    const errorMessage = err instanceof Error ? err.message : 'Upload failed'
+    toast(`Upload failed: ${errorMessage}`)
+    props.onUploadError?.(errorMessage)
   } finally {
-    isUploading.value = false;
-    uploadProgress.value = 0;
+    isUploading.value = false
+    uploadProgress.value = 0
   }
-};
+}
 
 const handleDragOver = (event: DragEvent) => {
-  event.preventDefault();
-  event.stopPropagation();
-};
+  event.preventDefault()
+  event.stopPropagation()
+}
 
 const handleDragEnter = (event: DragEvent) => {
-  event.preventDefault();
-  event.stopPropagation();
-  isDragOver.value = true;
-};
+  event.preventDefault()
+  event.stopPropagation()
+  isDragOver.value = true
+}
 
 const handleDragLeave = (event: DragEvent) => {
-  event.preventDefault();
-  event.stopPropagation();
+  event.preventDefault()
+  event.stopPropagation()
   // Only set isDragOver to false if we're leaving the drop zone entirely
-  const currentTarget = event.currentTarget as HTMLElement;
-  const relatedTarget = event.relatedTarget as HTMLElement;
+  const currentTarget = event.currentTarget as HTMLElement
+  const relatedTarget = event.relatedTarget as HTMLElement
   if (!currentTarget?.contains(relatedTarget)) {
-    isDragOver.value = false;
+    isDragOver.value = false
   }
-};
+}
 
 const handleDrop = async (event: DragEvent) => {
-  event.preventDefault();
-  event.stopPropagation();
-  isDragOver.value = false;
+  event.preventDefault()
+  event.stopPropagation()
+  isDragOver.value = false
 
-  if (isUploading.value) return;
+  if (isUploading.value) return
 
-  const files = event.dataTransfer?.files;
-  const file = files?.[0];
+  const files = event.dataTransfer?.files
+  const file = files?.[0]
 
-  if (!file) return;
+  if (!file) return
 
   // Validate file
-  const validationError = validateFile(file);
+  const validationError = validateFile(file)
   if (validationError) {
-    toast(validationError);
-    return;
+    toast(validationError)
+    return
   }
 
   try {
-    isUploading.value = true;
-    uploadProgress.value = 0;
+    isUploading.value = true
+    uploadProgress.value = 0
 
-    // Simulate upload progress
+    toast(`Starting upload of ${file.name}...`)
+
+    // Simulate progress for UI feedback while processing happens in background
     const progressInterval = setInterval(() => {
-      uploadProgress.value += Math.random() * 20;
+      uploadProgress.value += Math.random() * 20
       if (uploadProgress.value >= 90) {
-        clearInterval(progressInterval);
+        clearInterval(progressInterval)
       }
-    }, 200);
+    }, 200)
 
-    // Simulate processing delay
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    // Call success callback - this will trigger the VideoProcessingService
+    props.onUploadSuccess?.(file)
 
-    uploadProgress.value = 100;
-    clearInterval(progressInterval);
+    // Complete the progress bar
+    clearInterval(progressInterval)
+    uploadProgress.value = 100
 
-    // Call success callback
-    props.onUploadSuccess?.(file);
+    toast(`Upload successful! Video is being processed...`)
   } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : "Upload failed";
-    toast(errorMessage);
-    props.onUploadError?.(errorMessage);
+    const errorMessage = err instanceof Error ? err.message : 'Upload failed'
+    toast(`Upload failed: ${errorMessage}`)
+    props.onUploadError?.(errorMessage)
   } finally {
-    isUploading.value = false;
-    uploadProgress.value = 0;
+    isUploading.value = false
+    uploadProgress.value = 0
   }
-};
+}
 </script>

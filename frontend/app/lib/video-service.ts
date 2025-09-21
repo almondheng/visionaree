@@ -1,75 +1,191 @@
 import { videoDatabase, type VideoRecord } from './db'
-import { generateVideoThumbnail, createVideoBlob, getVideoFileInfo } from './video-utils'
+import {
+  generateVideoThumbnail,
+  createVideoBlob,
+  getVideoFileInfo,
+} from './video-utils'
+
+// API Configuration
+const API_BASE_URL =
+  'https://3x13ufwk43.execute-api.us-east-1.amazonaws.com/prod'
+
+// Types for API responses
+interface PresignedUrlResponse {
+  presignedUrl: string
+  key: string
+  bucket: string
+  expiresIn: number
+}
+
+interface PresignedUrlRequest {
+  filename: string
+  jobId: string
+  contentType: string
+}
+
+// API service functions
+export async function getPresignedUrl(
+  filename: string,
+  jobId: string,
+  contentType: string
+): Promise<PresignedUrlResponse> {
+  const response = await fetch(`${API_BASE_URL}/presigned-url`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      filename,
+      jobId,
+      contentType,
+    } as PresignedUrlRequest),
+  })
+
+  if (!response.ok) {
+    const errorData = await response
+      .json()
+      .catch(() => ({ error: 'Unknown error' }))
+    throw new Error(errorData.error || `HTTP error! status: ${response.status}`)
+  }
+
+  return await response.json()
+}
+
+export async function uploadFileToS3(
+  presignedUrl: string,
+  file: File,
+  onProgress?: (progress: number) => void
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+
+    // Track upload progress
+    if (onProgress) {
+      xhr.upload.addEventListener('progress', event => {
+        if (event.lengthComputable) {
+          const progress = Math.round((event.loaded / event.total) * 100)
+          onProgress(progress)
+        }
+      })
+    }
+
+    xhr.addEventListener('load', () => {
+      if (xhr.status === 200) {
+        resolve()
+      } else {
+        reject(new Error(`Upload failed with status: ${xhr.status}`))
+      }
+    })
+
+    xhr.addEventListener('error', () => {
+      reject(new Error('Upload failed due to network error'))
+    })
+
+    xhr.addEventListener('abort', () => {
+      reject(new Error('Upload was aborted'))
+    })
+
+    xhr.open('PUT', presignedUrl)
+    xhr.setRequestHeader('Content-Type', file.type)
+    xhr.send(file)
+  })
+}
+
+export async function uploadVideoToS3(
+  file: File,
+  onProgress?: (progress: number) => void
+): Promise<{ s3Uri: string; key: string; bucket: string }> {
+  // Generate a unique job ID
+  const jobId = `upload-${Date.now()}-${Math.random()
+    .toString(36)
+    .substr(2, 9)}`
+
+  try {
+    // Get presigned URL
+    const { presignedUrl, key, bucket } = await getPresignedUrl(
+      file.name,
+      jobId,
+      file.type
+    )
+
+    // Upload file to S3
+    await uploadFileToS3(presignedUrl, file, onProgress)
+
+    // Return S3 URI and metadata
+    const s3Uri = `s3://${bucket}/${key}`
+    return { s3Uri, key, bucket }
+  } catch (error) {
+    console.error('Upload to S3 failed:', error)
+    throw error
+  }
+}
 
 export class VideoProcessingService {
   async processVideo(file: File): Promise<string> {
     try {
       // Get basic file info
       const fileInfo = getVideoFileInfo(file)
-      
+
       // Create initial video record
       const videoId = await videoDatabase.addVideo({
         ...fileInfo,
         uploadedAt: new Date(),
-        processingStatus: 'pending'
+        processingStatus: 'pending',
       })
-      
+
       // Start processing in background
       this.processVideoInBackground(videoId, file)
-      
+
       return videoId
     } catch (error) {
       console.error('Failed to start video processing:', error)
       throw new Error('Failed to process video')
     }
   }
-  
-  private async processVideoInBackground(videoId: string, file: File): Promise<void> {
+
+  private async processVideoInBackground(
+    videoId: string,
+    file: File
+  ): Promise<void> {
     try {
       // Update status to processing
       await videoDatabase.updateVideo(videoId, {
-        processingStatus: 'processing'
+        processingStatus: 'processing',
       })
-      
+
       // Generate thumbnail and metadata
       const metadata = await generateVideoThumbnail(file)
-      
-      // Create video blob for storage
+
+      // Upload to S3 using presigned URL
+      const uploadResult = await uploadVideoToS3(file, progress => {
+        console.log(`Upload progress for ${videoId}: ${progress}%`)
+      })
+
+      // Create video blob for local storage (optional - you might want to remove this for large files)
       const videoBlob = await createVideoBlob(file)
-      
-      // Simulate backend upload (placeholder)
-      await this.simulateBackendUpload(file)
-      
+
       // Update video record with processed data
       await videoDatabase.updateVideo(videoId, {
         duration: metadata.duration,
         thumbnail: metadata.thumbnail,
         videoBlob,
-        processingStatus: 'completed'
+        s3Uri: uploadResult.s3Uri,
+        processingStatus: 'completed',
       })
-      
-      console.log(`Video ${videoId} processed successfully`)
+
+      console.log(
+        `Video ${videoId} processed and uploaded successfully to ${uploadResult.s3Uri}`
+      )
     } catch (error) {
       console.error(`Failed to process video ${videoId}:`, error)
-      
+
       // Update status to error
       await videoDatabase.updateVideo(videoId, {
-        processingStatus: 'error'
+        processingStatus: 'error',
       })
     }
   }
-  
-  private async simulateBackendUpload(file: File): Promise<void> {
-    // Placeholder for backend upload
-    // In a real implementation, this would upload the file to your backend
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        console.log(`Simulated upload of ${file.name} to backend`)
-        resolve()
-      }, 1000 + Math.random() * 2000) // Random delay between 1-3 seconds
-    })
-  }
-  
+
   async getAllVideos(): Promise<VideoRecord[]> {
     try {
       return await videoDatabase.getAllVideos()
@@ -78,7 +194,7 @@ export class VideoProcessingService {
       return []
     }
   }
-  
+
   async getVideo(id: string): Promise<VideoRecord | null> {
     try {
       return await videoDatabase.getVideo(id)
@@ -87,7 +203,7 @@ export class VideoProcessingService {
       return null
     }
   }
-  
+
   async deleteVideo(id: string): Promise<void> {
     try {
       await videoDatabase.deleteVideo(id)
@@ -97,19 +213,19 @@ export class VideoProcessingService {
       throw new Error('Failed to delete video')
     }
   }
-  
+
   async retryProcessing(id: string): Promise<void> {
     try {
       const video = await videoDatabase.getVideo(id)
       if (!video || !video.videoBlob) {
         throw new Error('Video not found or no video data available')
       }
-      
+
       // Convert blob back to file for reprocessing
-      const file = new File([video.videoBlob], video.filename, { 
-        type: video.videoBlob.type 
+      const file = new File([video.videoBlob], video.filename, {
+        type: video.videoBlob.type,
       })
-      
+
       await this.processVideoInBackground(id, file)
     } catch (error) {
       console.error(`Failed to retry processing for video ${id}:`, error)

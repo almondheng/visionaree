@@ -8,6 +8,7 @@ export interface VideoRecord {
   uploadedAt: Date
   processingStatus: 'pending' | 'processing' | 'completed' | 'error'
   videoBlob?: Blob
+  s3Uri?: string
 }
 
 class VideoDatabase {
@@ -26,13 +27,13 @@ class VideoDatabase {
         resolve()
       }
 
-      request.onupgradeneeded = (event) => {
+      request.onupgradeneeded = event => {
         const db = (event.target as IDBOpenDBRequest).result
-        
+
         if (!db.objectStoreNames.contains(this.storeName)) {
-          const store = db.createObjectStore(this.storeName, { 
-            keyPath: 'id', 
-            autoIncrement: true 
+          const store = db.createObjectStore(this.storeName, {
+            keyPath: 'id',
+            autoIncrement: true,
           })
           store.createIndex('filename', 'filename', { unique: false })
           store.createIndex('uploadedAt', 'uploadedAt', { unique: false })
@@ -43,16 +44,16 @@ class VideoDatabase {
 
   async addVideo(video: Omit<VideoRecord, 'id'>): Promise<string> {
     if (!this.db) await this.init()
-    
+
     return new Promise((resolve, reject) => {
       const transaction = this.db!.transaction([this.storeName], 'readwrite')
       const store = transaction.objectStore(this.storeName)
-      
+
       const request = store.add({
         ...video,
-        id: crypto.randomUUID()
+        id: crypto.randomUUID(),
       })
-      
+
       request.onsuccess = () => resolve(request.result as string)
       request.onerror = () => reject(request.error)
     })
@@ -60,17 +61,17 @@ class VideoDatabase {
 
   async getAllVideos(): Promise<VideoRecord[]> {
     if (!this.db) await this.init()
-    
+
     return new Promise((resolve, reject) => {
       const transaction = this.db!.transaction([this.storeName], 'readonly')
       const store = transaction.objectStore(this.storeName)
       const index = store.index('uploadedAt')
-      
+
       // Open cursor in descending order (prev = descending)
       const request = index.openCursor(null, 'prev')
       const videos: VideoRecord[] = []
-      
-      request.onsuccess = (event) => {
+
+      request.onsuccess = event => {
         const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result
         if (cursor) {
           videos.push(cursor.value)
@@ -79,19 +80,19 @@ class VideoDatabase {
           resolve(videos)
         }
       }
-      
+
       request.onerror = () => reject(request.error)
     })
   }
 
   async getVideo(id: string): Promise<VideoRecord | null> {
     if (!this.db) await this.init()
-    
+
     return new Promise((resolve, reject) => {
       const transaction = this.db!.transaction([this.storeName], 'readonly')
       const store = transaction.objectStore(this.storeName)
       const request = store.get(id)
-      
+
       request.onsuccess = () => resolve(request.result || null)
       request.onerror = () => reject(request.error)
     })
@@ -99,11 +100,11 @@ class VideoDatabase {
 
   async updateVideo(id: string, updates: Partial<VideoRecord>): Promise<void> {
     if (!this.db) await this.init()
-    
+
     return new Promise((resolve, reject) => {
       const transaction = this.db!.transaction([this.storeName], 'readwrite')
       const store = transaction.objectStore(this.storeName)
-      
+
       const getRequest = store.get(id)
       getRequest.onsuccess = () => {
         const video = getRequest.result
@@ -111,10 +112,10 @@ class VideoDatabase {
           reject(new Error('Video not found'))
           return
         }
-        
+
         const updatedVideo = { ...video, ...updates }
         const putRequest = store.put(updatedVideo)
-        
+
         putRequest.onsuccess = () => resolve()
         putRequest.onerror = () => reject(putRequest.error)
       }
@@ -124,12 +125,12 @@ class VideoDatabase {
 
   async deleteVideo(id: string): Promise<void> {
     if (!this.db) await this.init()
-    
+
     return new Promise((resolve, reject) => {
       const transaction = this.db!.transaction([this.storeName], 'readwrite')
       const store = transaction.objectStore(this.storeName)
       const request = store.delete(id)
-      
+
       request.onsuccess = () => resolve()
       request.onerror = () => reject(request.error)
     })
