@@ -306,7 +306,7 @@ def get_job_status(job_id: str) -> Dict[str, Any]:
         return None
 
 
-system_prompt = """You are an AI assistant that helps users find relevant video segments and provides insights based on their queries. 
+system_prompt = """You are an AI assistant that helps users find relevant video segments of surveillance footage and provides insights based on their queries. 
 
 You will be given:
 1. A list of video segments with timestamps and captions
@@ -323,7 +323,8 @@ Return your response as a JSON object with this exact structure:
         {
             "segment_id": <number>,
             "relevance_score": <number between 0 and 1>,
-            "relevance_reason": "<brief explanation>"
+            "relevance_reason": "<brief explanation>",
+            "threat_level": <"low", "medium", "high">
         }
     ],
     "insights": "<comprehensive summary of findings>"
@@ -354,7 +355,6 @@ def filter_segments_with_nova_pro(
                     "segment_id": i,
                     "start_time": float(segment.get("segmentStartTime", 0)),
                     "caption": segment.get("caption", ""),
-                    "timestamp": segment.get("timestamp", ""),
                 }
             )
 
