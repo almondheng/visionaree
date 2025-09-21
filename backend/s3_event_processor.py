@@ -958,7 +958,7 @@ def summarize_video_segments(job_id: str, uploaded_segments: List[str], segment_
                 filename = Path(segment_url).name  # e.g., "2.mp4"
                 segment_index = int(filename.split('.')[0])  # e.g., 2
                 # Calculate start time from segment index, file name starts from 1
-                start_time = (segment_index - 1) * segment_duration  # e.g. second file (2 - 1) * 5 = 5
+                start_time = segment_index * segment_duration  # e.g. second file (2 - 1) * 5 = 5
                 segment_mapping[start_time] = segment_url
             except (ValueError, IndexError) as e:
                 logger.warning(f"Could not parse start time from segment URL {segment_url}: {str(e)}")
