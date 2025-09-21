@@ -92,13 +92,12 @@ export async function uploadFileToS3(
 }
 
 export async function uploadVideoToS3(
+  videoId: string,
   file: File,
   onProgress?: (progress: number) => void
 ): Promise<{ s3Uri: string; key: string; bucket: string }> {
   // Generate a unique job ID
-  const jobId = `upload-${Date.now()}-${Math.random()
-    .toString(36)
-    .substr(2, 9)}`
+  const jobId = `upload-${videoId}`
 
   try {
     // Get presigned URL
@@ -157,7 +156,7 @@ export class VideoProcessingService {
       const metadata = await generateVideoThumbnail(file)
 
       // Upload to S3 using presigned URL
-      const uploadResult = await uploadVideoToS3(file, progress => {
+      const uploadResult = await uploadVideoToS3(videoId, file, progress => {
         console.log(`Upload progress for ${videoId}: ${progress}%`)
       })
 
