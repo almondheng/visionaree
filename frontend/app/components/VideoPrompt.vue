@@ -152,25 +152,17 @@
                   </div>
                 </div>
 
-                <!-- Answer with timestamps -->
-                <div class="pl-6 space-y-2">
+                <!-- Answer with segments and insights -->
+                <div class="pl-6 space-y-3">
+                  <!-- Insights section -->
                   <div
-                    v-for="(event, eventIndex) in response.events"
-                    :key="eventIndex"
-                    class="flex items-start gap-3 p-3 bg-background border rounded-lg hover:bg-muted/30 transition-colors cursor-pointer"
-                    @click="$emit('seek-to-timestamp', event.timestamp)"
+                    v-if="response.insights"
+                    class="p-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg"
                   >
-                    <Badge
-                      variant="secondary"
-                      class="mt-0.5 shrink-0 font-mono text-xs"
-                    >
-                      {{ formatTimestamp(event.timestamp) }}
-                    </Badge>
-                    <p class="text-sm flex-1">{{ event.description }}</p>
-                    <div class="mt-0.5 shrink-0 text-muted-foreground">
+                    <div class="flex items-start gap-2 mb-2">
                       <svg
                         xmlns="http://www.w3.org/2000/svg"
-                        class="h-4 w-4"
+                        class="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 shrink-0"
                         fill="none"
                         viewBox="0 0 24 24"
                         stroke="currentColor"
@@ -179,9 +171,82 @@
                           stroke-linecap="round"
                           stroke-linejoin="round"
                           stroke-width="2"
-                          d="M14.828 14.828a4 4 0 01-5.656 0M9 10h1m4 0h1m-6 4h8m2-10v18a2 2 0 01-2 2H6a2 2 0 01-2-2V4a2 2 0 012-2h12a2 2 0 012 2z"
+                          d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
                         />
                       </svg>
+                      <h4
+                        class="font-semibold text-sm text-blue-900 dark:text-blue-100"
+                      >
+                        AI Insights
+                      </h4>
+                    </div>
+                    <p class="text-sm text-blue-800 dark:text-blue-200">
+                      {{ response.insights }}
+                    </p>
+                    <div v-if="response.totalRelevantSegments" class="mt-2">
+                      <Badge
+                        variant="outline"
+                        class="text-xs border-blue-300 text-blue-700 dark:border-blue-600 dark:text-blue-300"
+                      >
+                        {{ response.totalRelevantSegments }} relevant segments
+                        found
+                      </Badge>
+                    </div>
+                  </div>
+
+                  <!-- Segments -->
+                  <div class="space-y-2">
+                    <div
+                      v-for="(segment, segmentIndex) in response.segments"
+                      :key="segmentIndex"
+                      class="flex items-start gap-3 p-3 bg-background border rounded-lg hover:bg-muted/30 transition-colors cursor-pointer"
+                      @click="
+                        $emit('seek-to-timestamp', segment.segmentStartTime)
+                      "
+                    >
+                      <Badge
+                        variant="secondary"
+                        class="mt-0.5 shrink-0 font-mono text-xs"
+                      >
+                        {{ formatTimestamp(segment.segmentStartTime) }}
+                      </Badge>
+                      <div class="flex-1 space-y-1">
+                        <p class="text-sm">{{ segment.caption }}</p>
+                        <div class="flex items-center gap-2">
+                          <Badge
+                            :variant="
+                              segment.relevance_score >= 0.8
+                                ? 'destructive'
+                                : segment.relevance_score >= 0.6
+                                ? 'default'
+                                : 'secondary'
+                            "
+                            class="text-xs"
+                          >
+                            {{ Math.round(segment.relevance_score * 100) }}%
+                            relevant
+                          </Badge>
+                          <span class="text-xs text-muted-foreground">{{
+                            segment.relevance_reason
+                          }}</span>
+                        </div>
+                      </div>
+                      <div class="mt-0.5 shrink-0 text-muted-foreground">
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          class="h-4 w-4"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                        >
+                          <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            stroke-width="2"
+                            d="M14.828 14.828a4 4 0 01-5.656 0M9 10h1m4 0h1m-6 4h8m2-10v18a2 2 0 01-2 2H6a2 2 0 01-2-2V4a2 2 0 012-2h12a2 2 0 012 2z"
+                          />
+                        </svg>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -219,6 +284,11 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { Badge } from '@/components/ui/badge'
 import { formatTimestamp } from '@/lib/utils'
+import {
+  queryVideo,
+  type FilteredSegment,
+  type VideoQueryResponse,
+} from '@/lib/video-service'
 
 // Props
 interface Props {
@@ -233,14 +303,18 @@ const emit = defineEmits<{
 }>()
 
 // Types
-interface VideoEvent {
-  timestamp: number
-  description: string
+interface VideoSegment {
+  segmentStartTime: number
+  caption: string
+  relevance_score: number
+  relevance_reason: string
 }
 
 interface VideoResponse {
   question: string
-  events: VideoEvent[]
+  segments: VideoSegment[]
+  insights?: string
+  totalRelevantSegments?: number
 }
 
 // Reactive state
@@ -256,30 +330,29 @@ async function submitPrompt() {
   isLoading.value = true
 
   try {
-    // TODO: Replace with actual API call
-    // For now, simulate API response
-    await new Promise(resolve => setTimeout(resolve, 2000))
+    // Generate job ID from video ID (assuming it follows the upload-{videoId} pattern)
+    const jobId = `upload-${props.videoId}`
 
-    // Mock response - replace with actual API call
-    const mockEvents: VideoEvent[] = [
-      {
-        timestamp: 15.5,
-        description: 'Person enters the frame and starts speaking',
-      },
-      {
-        timestamp: 45.2,
-        description: 'Camera pans to show the surrounding environment',
-      },
-      {
-        timestamp: 78.9,
-        description: 'Action sequence begins with movement',
-      },
-    ]
+    // Call the real API
+    const apiResponse: VideoQueryResponse = await queryVideo(jobId, question)
+
+    // Transform the API response to our component format
+    const segments: VideoSegment[] =
+      apiResponse.ai_analysis.filtered_segments.map(
+        (segment: FilteredSegment) => ({
+          segmentStartTime: parseInt(segment.segmentStartTime),
+          caption: segment.caption,
+          relevance_score: segment.relevance_score,
+          relevance_reason: segment.relevance_reason,
+        })
+      )
 
     // Add the response
     responses.value.push({
       question,
-      events: mockEvents,
+      segments,
+      insights: apiResponse.ai_analysis.insights,
+      totalRelevantSegments: apiResponse.ai_analysis.total_relevant_segments,
     })
 
     // Clear the input
@@ -287,6 +360,14 @@ async function submitPrompt() {
   } catch (error) {
     console.error('Error submitting prompt:', error)
     // You might want to show an error message to the user
+    // For now, add an error response
+    responses.value.push({
+      question,
+      segments: [],
+      insights:
+        'Sorry, there was an error processing your query. Please try again.',
+    })
+    promptText.value = ''
   } finally {
     isLoading.value = false
   }

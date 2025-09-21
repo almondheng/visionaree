@@ -79,15 +79,81 @@
                   ref="videoPlayer"
                   class="w-full h-full object-contain"
                   autoplay
-                  controls
                   @loadedmetadata="onVideoLoaded"
                   @timeupdate="onTimeUpdate"
                   @error="onVideoError"
                   @loadstart="onLoadStart"
                   @canplay="onCanPlay"
+                  @play="onPlay"
+                  @pause="onPause"
+                  @click="togglePlayPause"
                 >
                   Your browser does not support the video tag.
                 </video>
+
+                <!-- Video progress overlay -->
+                <div
+                  v-if="
+                    video.processingStatus === 'completed' && video.videoBlob
+                  "
+                  class="absolute bottom-0 left-0 right-0 p-2"
+                >
+                  <!-- Minimal progress bar -->
+                  <div class="bg-black/30 backdrop-blur-sm rounded px-3 py-1.5">
+                    <!-- Progress slider -->
+                    <div class="flex items-center gap-2">
+                      <!-- Play/Pause button -->
+                      <button
+                        @click="togglePlayPause"
+                        class="flex items-center justify-center w-6 h-6 bg-white/20 hover:bg-white/30 rounded transition-all duration-200 text-white flex-shrink-0"
+                      >
+                        <!-- Play icon -->
+                        <svg
+                          v-if="!isPlaying"
+                          xmlns="http://www.w3.org/2000/svg"
+                          class="h-3 w-3"
+                          fill="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path d="M8 5v14l11-7z" />
+                        </svg>
+                        <!-- Pause icon -->
+                        <svg
+                          v-else
+                          xmlns="http://www.w3.org/2000/svg"
+                          class="h-3 w-3"
+                          fill="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+                        </svg>
+                      </button>
+
+                      <!-- Time display -->
+                      <span
+                        class="text-white text-xs font-medium whitespace-nowrap"
+                      >
+                        {{ formatDuration(currentTime) }}
+                      </span>
+
+                      <!-- Progress slider -->
+                      <Slider
+                        :model-value="progress"
+                        :max="duration"
+                        :step="1"
+                        class="flex-1 cursor-pointer"
+                        @update:model-value="onProgressChange"
+                      />
+
+                      <!-- Duration -->
+                      <span
+                        class="text-white text-xs font-medium whitespace-nowrap"
+                      >
+                        {{ formatDuration(duration) }}
+                      </span>
+                    </div>
+                  </div>
+                </div>
 
                 <!-- Thumbnail for non-completed videos -->
                 <div
@@ -363,6 +429,7 @@ import {
   CardTitle,
 } from '~/components/ui/card'
 import VideoPrompt from '~/components/VideoPrompt.vue'
+import { Slider } from '~/components/ui/slider'
 import { videoProcessingService } from '~/lib/video-service'
 import type { VideoRecord } from '~/lib/db'
 
@@ -375,6 +442,12 @@ const video = ref<VideoRecord | null>(null)
 const isLoading = ref(true)
 const error = ref(false)
 const videoPlayer = ref<HTMLVideoElement>()
+
+// Video overlay state
+const currentTime = ref(0)
+const duration = ref(0)
+const isPlaying = ref(false)
+const progress = ref([0])
 
 // Auto-refresh for processing status
 let refreshInterval: ReturnType<typeof setInterval> | null = null
@@ -477,16 +550,24 @@ const onVideoLoaded = () => {
     videoHeight: videoPlayer.value?.videoHeight,
     readyState: videoPlayer.value?.readyState,
   })
+
+  // Update duration for overlay
+  if (videoPlayer.value?.duration) {
+    duration.value = videoPlayer.value.duration
+  }
 }
 
 const onTimeUpdate = useThrottleFn(() => {
   if (videoPlayer.value && videoPlayer.value.duration) {
-    const progress =
+    currentTime.value = videoPlayer.value.currentTime
+    progress.value = [videoPlayer.value.currentTime]
+
+    const progressPercent =
       (videoPlayer.value.currentTime / videoPlayer.value.duration) * 100
     // Could emit progress for future annotation features
     const currentTimeInSeconds = videoPlayer.value.currentTime
     console.log(
-      `Video progress: ${progress.toFixed(
+      `Video progress: ${progressPercent.toFixed(
         1
       )}% (${currentTimeInSeconds.toFixed()}s)`
     )
@@ -508,6 +589,36 @@ const onLoadStart = () => {
 
 const onCanPlay = () => {
   console.log('Video can start playing')
+}
+
+// Video overlay and control methods
+const onPlay = () => {
+  isPlaying.value = true
+}
+
+const onPause = () => {
+  isPlaying.value = false
+}
+
+const togglePlayPause = () => {
+  if (!videoPlayer.value) return
+
+  if (videoPlayer.value.paused) {
+    videoPlayer.value.play()
+  } else {
+    videoPlayer.value.pause()
+  }
+}
+
+const onProgressChange = (value: number[] | undefined) => {
+  if (!videoPlayer.value || !value?.length) return
+
+  const newTime = value[0]
+  if (typeof newTime === 'number') {
+    videoPlayer.value.currentTime = newTime
+    currentTime.value = newTime
+    progress.value = value
+  }
 }
 
 const startAnnotation = () => {

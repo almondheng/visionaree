@@ -23,6 +23,46 @@ interface PresignedUrlRequest {
   contentType: string
 }
 
+interface VideoQueryRequest {
+  query: string
+}
+
+export interface FilteredSegment {
+  segmentStartTime: string
+  caption: string
+  timestamp: string
+  metadata: {
+    inference_timestamp: string
+    status: string
+    model_id: string
+  }
+  relevance_score: number
+  relevance_reason: string
+}
+
+interface JobInfo {
+  videoFileName: string
+  videoDuration: string
+  totalSegments: string
+  processedSegments: string
+  jobStatus: string
+}
+
+interface AiAnalysis {
+  status: string
+  filtered_segments: FilteredSegment[]
+  insights: string
+  total_relevant_segments: number
+}
+
+export interface VideoQueryResponse {
+  jobId: string
+  status: string
+  query: string
+  jobInfo: JobInfo
+  ai_analysis: AiAnalysis
+}
+
 // API service functions
 export async function getPresignedUrl(
   filename: string,
@@ -39,6 +79,30 @@ export async function getPresignedUrl(
       jobId,
       contentType,
     } as PresignedUrlRequest),
+  })
+
+  if (!response.ok) {
+    const errorData = await response
+      .json()
+      .catch(() => ({ error: 'Unknown error' }))
+    throw new Error(errorData.error || `HTTP error! status: ${response.status}`)
+  }
+
+  return await response.json()
+}
+
+export async function queryVideo(
+  jobId: string,
+  query: string
+): Promise<VideoQueryResponse> {
+  const response = await fetch(`${API_BASE_URL}/video/${jobId}/ask`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query,
+    } as VideoQueryRequest),
   })
 
   if (!response.ok) {
