@@ -136,6 +136,7 @@ onBeforeUnmount(() => {
 // Methods
 const loadVideos = async () => {
   try {
+    console.log('Loading videos...')
     isLoading.value = true
     videos.value = await videoProcessingService.getAllVideos()
   } catch (err) {

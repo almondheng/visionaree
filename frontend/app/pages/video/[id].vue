@@ -61,132 +61,152 @@
     </div>
 
     <!-- Video detail view -->
-    <div v-else>
-      <!-- Video player section -->
-      <Card class="mb-8 py-0">
-        <CardContent class="p-0">
-          <div
-            class="bg-gray-100 dark:bg-gray-800 relative overflow-hidden rounded-lg"
-          >
-            <!-- Video player for completed videos -->
-            <div
-              v-if="video.processingStatus === 'completed' && video.videoBlob"
-              class="w-full h-full"
-            >
-              <video
-                ref="videoPlayer"
-                class="w-full h-full object-contain"
-                autoplay
-                controls
-                @loadedmetadata="onVideoLoaded"
-                @timeupdate="onTimeUpdate"
-                @error="onVideoError"
-                @loadstart="onLoadStart"
-                @canplay="onCanPlay"
+    <div v-else class="flex flex-col gap-8">
+      <!-- Video player and prompt section -->
+      <div class="grid grid-cols-1 xl:grid-cols-3 gap-8">
+        <!-- Video player section -->
+        <div class="xl:col-span-2 h-full max-h-[500px]">
+          <Card class="py-0 h-full">
+            <CardContent class="p-0 h-full">
+              <div
+                class="bg-gray-100 dark:bg-gray-800 relative overflow-hidden rounded-lg h-full"
               >
-                Your browser does not support the video tag.
-              </video>
-            </div>
-
-            <!-- Thumbnail for non-completed videos -->
-            <div v-else class="w-full h-full flex items-center justify-center">
-              <img
-                v-if="video.thumbnail"
-                :src="video.thumbnail"
-                :alt="video.title"
-                class="w-full h-full object-cover"
-              />
-              <div v-else class="text-gray-400">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  class="h-24 w-24"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
+                <!-- Video player for completed videos -->
+                <video
+                  v-if="
+                    video.processingStatus === 'completed' && video.videoBlob
+                  "
+                  ref="videoPlayer"
+                  class="w-full h-full object-contain"
+                  autoplay
+                  controls
+                  @loadedmetadata="onVideoLoaded"
+                  @timeupdate="onTimeUpdate"
+                  @error="onVideoError"
+                  @loadstart="onLoadStart"
+                  @canplay="onCanPlay"
                 >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
-                  />
-                </svg>
-              </div>
-            </div>
+                  Your browser does not support the video tag.
+                </video>
 
-            <!-- Processing overlay -->
-            <div
-              v-if="video.processingStatus === 'processing'"
-              class="absolute inset-0 bg-black/50 flex items-center justify-center"
-            >
-              <div class="text-white text-center">
+                <!-- Thumbnail for non-completed videos -->
                 <div
-                  class="animate-spin rounded-full h-8 w-8 border-b-2 border-white mb-4 mx-auto"
-                ></div>
-                <p class="text-lg">Processing video...</p>
-                <p class="text-sm text-gray-300">This may take a few minutes</p>
-              </div>
-            </div>
-
-            <!-- Error overlay -->
-            <div
-              v-if="video.processingStatus === 'error'"
-              class="absolute inset-0 bg-red-500/20 flex items-center justify-center"
-            >
-              <div class="text-white text-center">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  class="h-8 w-8 mx-auto mb-4"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
+                  v-else
+                  class="w-full h-full flex items-center justify-center min-h-[400px]"
                 >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  <img
+                    v-if="video.thumbnail"
+                    :src="video.thumbnail"
+                    :alt="video.title"
+                    class="w-full h-full object-cover"
                   />
-                </svg>
-                <p class="text-lg">Processing failed</p>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  class="mt-2 bg-white/10 border-white/20 text-white hover:bg-white/20"
-                  @click="retryProcessing"
-                >
-                  Retry
-                </Button>
-              </div>
-            </div>
+                  <div v-else class="text-gray-400">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      class="h-24 w-24"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
+                      />
+                    </svg>
+                  </div>
+                </div>
 
-            <!-- Status indicator -->
-            <div class="absolute top-4 right-4">
-              <div
-                v-if="video.processingStatus === 'completed'"
-                class="flex items-center gap-2 bg-green-500/80 text-white text-sm px-3 py-1 rounded-full"
-              >
-                <div class="w-2 h-2 bg-white rounded-full"></div>
-                Ready
+                <!-- Processing overlay -->
+                <div
+                  v-if="video.processingStatus === 'processing'"
+                  class="absolute inset-0 bg-black/50 flex items-center justify-center"
+                >
+                  <div class="text-white text-center">
+                    <div
+                      class="animate-spin rounded-full h-8 w-8 border-b-2 border-white mb-4 mx-auto"
+                    ></div>
+                    <p class="text-lg">Processing video...</p>
+                    <p class="text-sm text-gray-300">
+                      This may take a few minutes
+                    </p>
+                  </div>
+                </div>
+
+                <!-- Error overlay -->
+                <div
+                  v-if="video.processingStatus === 'error'"
+                  class="absolute inset-0 bg-red-500/20 flex items-center justify-center"
+                >
+                  <div class="text-white text-center">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      class="h-8 w-8 mx-auto mb-4"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                      />
+                    </svg>
+                    <p class="text-lg">Processing failed</p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      class="mt-2 bg-white/10 border-white/20 text-white hover:bg-white/20"
+                      @click="retryProcessing"
+                    >
+                      Retry
+                    </Button>
+                  </div>
+                </div>
+
+                <!-- Status indicator -->
+                <div class="absolute top-4 right-4">
+                  <div
+                    v-if="video.processingStatus === 'completed'"
+                    class="flex items-center gap-2 bg-green-500/80 text-white text-sm px-3 py-1 rounded-full"
+                  >
+                    <div class="w-2 h-2 bg-white rounded-full"></div>
+                    Ready
+                  </div>
+                  <div
+                    v-else-if="video.processingStatus === 'error'"
+                    class="flex items-center gap-2 bg-red-500/80 text-white text-sm px-3 py-1 rounded-full"
+                  >
+                    <div class="w-2 h-2 bg-white rounded-full"></div>
+                    Error
+                  </div>
+                  <div
+                    v-else-if="video.processingStatus === 'pending'"
+                    class="flex items-center gap-2 bg-yellow-500/80 text-white text-sm px-3 py-1 rounded-full"
+                  >
+                    <div class="w-2 h-2 bg-white rounded-full"></div>
+                    Pending
+                  </div>
+                </div>
               </div>
-              <div
-                v-else-if="video.processingStatus === 'error'"
-                class="flex items-center gap-2 bg-red-500/80 text-white text-sm px-3 py-1 rounded-full"
-              >
-                <div class="w-2 h-2 bg-white rounded-full"></div>
-                Error
-              </div>
-              <div
-                v-else-if="video.processingStatus === 'pending'"
-                class="flex items-center gap-2 bg-yellow-500/80 text-white text-sm px-3 py-1 rounded-full"
-              >
-                <div class="w-2 h-2 bg-white rounded-full"></div>
-                Pending
-              </div>
-            </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <!-- Video prompt section -->
+        <div class="xl:col-span-1 h-full max-h-[500px]">
+          <VideoPrompt
+            v-if="video?.id"
+            :video-id="video.id"
+            @seek-to-timestamp="seekToTimestamp"
+          />
+          <div v-else class="h-full flex items-center justify-center">
+            <p class="text-muted-foreground">Loading video...</p>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       <!-- Video information -->
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -194,7 +214,7 @@
         <div class="lg:col-span-2">
           <Card>
             <CardHeader>
-              <CardTitle class="text-2xl">{{ video.title }}</CardTitle>
+              <CardTitle class="text-2xl">{{ video?.title }}</CardTitle>
               <CardDescription class="text-base">
                 Video details and information
               </CardDescription>
@@ -207,7 +227,7 @@
                   >
                     Filename
                   </label>
-                  <p class="text-sm">{{ video.filename }}</p>
+                  <p class="text-sm">{{ video?.filename }}</p>
                 </div>
                 <div>
                   <label
@@ -215,7 +235,9 @@
                   >
                     File Size
                   </label>
-                  <p class="text-sm">{{ formatFileSize(video.size) }}</p>
+                  <p class="text-sm">
+                    {{ video?.size ? formatFileSize(video.size) : 'Unknown' }}
+                  </p>
                 </div>
                 <div>
                   <label
@@ -225,7 +247,7 @@
                   </label>
                   <p class="text-sm">
                     {{
-                      video.duration
+                      video?.duration
                         ? formatDuration(video.duration)
                         : 'Unknown'
                     }}
@@ -237,7 +259,13 @@
                   >
                     Uploaded
                   </label>
-                  <p class="text-sm">{{ formatDate(video.uploadedAt) }}</p>
+                  <p class="text-sm">
+                    {{
+                      video?.uploadedAt
+                        ? formatDate(video.uploadedAt)
+                        : 'Unknown'
+                    }}
+                  </p>
                 </div>
               </div>
             </CardContent>
@@ -252,7 +280,7 @@
             </CardHeader>
             <CardContent class="space-y-3">
               <Button
-                v-if="video.processingStatus === 'completed'"
+                v-if="video?.processingStatus === 'completed'"
                 class="w-full"
                 @click="startAnnotation"
               >
@@ -277,7 +305,7 @@
                 variant="outline"
                 class="w-full"
                 @click="downloadVideo"
-                :disabled="video.processingStatus !== 'completed'"
+                :disabled="video?.processingStatus !== 'completed'"
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -322,8 +350,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, nextTick, watch, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useThrottleFn } from '@vueuse/core'
 import { toast } from 'vue-sonner'
 import { Button } from '~/components/ui/button'
 import {
@@ -333,6 +362,7 @@ import {
   CardHeader,
   CardTitle,
 } from '~/components/ui/card'
+import VideoPrompt from '~/components/VideoPrompt.vue'
 import { videoProcessingService } from '~/lib/video-service'
 import type { VideoRecord } from '~/lib/db'
 
@@ -542,6 +572,17 @@ const startAutoRefresh = () => {
       await loadVideo()
     }
   }, 5000)
+}
+
+const seekToTimestamp = (timestamp: number) => {
+  if (videoPlayer.value && video.value?.processingStatus === 'completed') {
+    videoPlayer.value.currentTime = timestamp
+    videoPlayer.value.play().catch(err => {
+      console.error('Error playing video:', err)
+    })
+  } else {
+    toast('Video is not ready for playback')
+  }
 }
 
 // Utility functions
