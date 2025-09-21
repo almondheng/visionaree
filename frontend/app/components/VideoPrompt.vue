@@ -125,17 +125,17 @@
                       <div class="flex flex-col items-start gap-1">
                         <Badge
                           :variant="
-                            segment.relevance_score >= 0.8
+                            segment.threat_level === 'high'
                               ? 'destructive'
                               : 'default'
                           "
                           class="text-xs"
                           :class="
-                            segment.relevance_score >= 0.8
+                            segment.threat_level === 'high'
                               ? ''
-                              : segment.relevance_score >= 0.6
-                              ? 'bg-orange-600'
-                              : 'bg-yellow-600'
+                              : segment.threat_level === 'medium'
+                              ? 'bg-amber-500'
+                              : 'bg-yellow-500'
                           "
                         >
                           {{ formatTimestamp(segment.segmentStartTime) }}
@@ -279,7 +279,7 @@ const emit = defineEmits<{
 interface VideoSegment {
   segmentStartTime: number
   caption: string
-  relevance_score: number
+  threat_level: 'low' | 'medium' | 'high'
   relevance_reason: string
 }
 
@@ -334,7 +334,7 @@ async function submitPrompt() {
         (segment: FilteredSegment) => ({
           segmentStartTime: parseInt(segment.segmentStartTime),
           caption: segment.caption,
-          relevance_score: segment.relevance_score,
+          threat_level: segment.threat_level,
           relevance_reason: segment.relevance_reason,
         })
       )

@@ -38,6 +38,7 @@ export interface FilteredSegment {
   }
   relevance_score: number
   relevance_reason: string
+  threat_level: 'low' | 'medium' | 'high'
 }
 
 interface JobInfo {
