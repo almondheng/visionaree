@@ -14,6 +14,7 @@ export class BackendStack extends cdk.Stack {
   public readonly presignedUrlFunction: lambda.Function;
   public readonly s3EventProcessor: lambda.Function;
   public readonly videoQueryHandler: lambda.Function;
+  public readonly jobStatusHandler: lambda.Function;
   public readonly api: apigateway.RestApi;
   public readonly videoAnalysisTable: dynamodb.Table;
   public readonly jobStatusTable: dynamodb.Table;
@@ -185,6 +186,19 @@ export class BackendStack extends cdk.Stack {
       description: 'Handle video analysis queries and search requests'
     });
 
+    // Create Lambda function for job status polling
+    this.jobStatusHandler = new lambda.Function(this, 'JobStatusHandler', {
+      runtime: lambda.Runtime.PYTHON_3_11,
+      code: lambda.Code.fromAsset(path.join(__dirname, '../../backend')),
+      handler: 'job_status_handler.lambda_handler',
+      environment: {
+        JOB_STATUS_TABLE_NAME: this.jobStatusTable.tableName
+      },
+      timeout: cdk.Duration.seconds(10),
+      memorySize: 256,
+      description: 'Return only the status field for a video processing job'
+    });
+
     // Grant Lambda function permissions to generate presigned URLs for the S3 bucket
     this.s3Bucket.grantPut(this.presignedUrlFunction);
     this.s3Bucket.grantRead(this.presignedUrlFunction);
@@ -205,6 +219,7 @@ export class BackendStack extends cdk.Stack {
     // Grant video query handler permissions to read from DynamoDB tables
     this.videoAnalysisTable.grantReadData(this.videoQueryHandler);
     this.jobStatusTable.grantReadData(this.videoQueryHandler);
+  this.jobStatusTable.grantReadData(this.jobStatusHandler);
 
     // Additional IAM permissions for presigned URL generation
     this.presignedUrlFunction.addToRolePolicy(
@@ -357,6 +372,7 @@ export class BackendStack extends cdk.Stack {
     const videoResource = this.api.root.addResource('video');
     const jobIdResource = videoResource.addResource('{jobId}');
     const askResource = jobIdResource.addResource('ask');
+  const statusResource = jobIdResource.addResource('status');
     
     const videoQueryIntegration = new apigateway.LambdaIntegration(
       this.videoQueryHandler,
@@ -389,6 +405,17 @@ export class BackendStack extends cdk.Stack {
           }
         })
       }
+    });
+
+    // Add job status endpoint: /video/{jobId}/status (GET)
+    const jobStatusIntegration = new apigateway.LambdaIntegration(
+      this.jobStatusHandler,
+      {
+        requestTemplates: { 'application/json': '{ "statusCode": "200" }' }
+      }
+    );
+    statusResource.addMethod('GET', jobStatusIntegration, {
+      authorizationType: apigateway.AuthorizationType.NONE
     });
 
     // Configure S3 bucket to send upload events to the processor Lambda
@@ -487,6 +514,11 @@ export class BackendStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'VideoQueryHandlerName', {
       value: this.videoQueryHandler.functionName,
       description: 'Name of the video query handler Lambda function'
+    });
+
+    new cdk.CfnOutput(this, 'JobStatusEndpoint', {
+      value: `${this.api.url}video/{jobId}/status`,
+      description: 'Job status polling endpoint that returns only the status field'
     });
   }
 }
