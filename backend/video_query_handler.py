@@ -244,13 +244,19 @@ def get_job_segments(job_id: str) -> Dict[str, Any]:
         # Sort segments by start time
         segment_captions.sort(key=lambda x: x.get("segmentStartTime", 0))
 
-        # Prepare simplified segment data
+        # Prepare simplified segment data (omit segments with empty/missing caption)
         segments = []
         for segment in segment_captions:
+            caption = segment.get("caption")
+            # Skip if caption is None or empty/whitespace
+            if caption is None:
+                continue
+            if isinstance(caption, str) and caption.strip() == "":
+                continue
             segments.append(
                 {
                     "segmentStartTime": segment.get("segmentStartTime", 0),
-                    "caption": segment.get("caption", ""),
+                    "caption": caption,
                     "timestamp": segment.get("timestamp"),
                     "metadata": segment.get("inferenceMetadata", {}),
                 }
