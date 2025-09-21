@@ -1,158 +1,112 @@
 # Visionaree
 
-Security footage insights using Amazon Bedrock Nova Lite model.
+AI-powered video understanding with a Nuxt 3 frontend and a fully serverless AWS backend (API Gateway, Lambda, S3, DynamoDB, Bedrock).
 
-## Overview
+## What’s in this repo
 
-Visionaree is a Python application that analyzes security footage by uploading video files to Amazon S3 and using Amazon Bedrock's Nova Lite model to generate detailed descriptions of the video content.
+- `frontend/` — Nuxt 3 application (upload UI, video player, Q&A chat)
+- `backend/` — Lambda handlers (S3 event processing, video query, job status, presigned URL)
+- `infra/` — AWS CDK TypeScript stack (API, Lambdas, S3 buckets, DynamoDB tables, permissions)
+- `API_DOCUMENTATION.md` — Detailed API reference (routes, bodies, examples)
 
-## Features
+An architecture diagram is available in `backend/architecture.drawio`.
 
-- Upload video files to Amazon S3 with encryption
-- Analyze videos using Amazon Bedrock Nova Lite model (inference profile: `apac.amazon.nova-lite-v1:0`)
-- Generate detailed descriptions focusing on security-relevant activities
-- Command-line interface for easy usage
-- Automatic S3 bucket creation and management
-- Comprehensive error handling and logging
+## High-level architecture
+
+1. User uploads a video from the web UI. The app requests a presigned URL, then uploads directly to S3.
+2. An S3 event triggers a Lambda that segments the video with FFmpeg (via a Lambda layer), summarizes segments with Amazon Bedrock, and stores captions/results in DynamoDB. Segments are written to a dedicated segments bucket.
+3. The UI can query insights for a video job via API. A job status endpoint is exposed to allow polling until processing is complete.
+
+Key services:
+- Amazon S3: uploads bucket + separate segments bucket
+- AWS Lambda: presigned URL handler, S3 event processor, video query handler, job status handler
+- Amazon DynamoDB: analysis table and job status table
+- Amazon Bedrock: model invocation for segment captioning and query insights
 
 ## Prerequisites
 
-- Python 3.8 or higher
-- AWS Account with appropriate permissions for:
-  - Amazon S3 (create buckets, upload objects)
-  - Amazon Bedrock (invoke Nova Lite model)
-- AWS CLI configured with credentials or IAM role with appropriate permissions
+- Node.js 18+ and `pnpm` (or npm/yarn)
+- AWS account and credentials configured locally
+- AWS CDK v2 (`npm i -g aws-cdk`)
+- Python 3.11 for Lambda packaging (managed by CDK; no local server needed)
 
-## Installation
+## Deploy the backend (CDK)
 
-1. Clone the repository:
-```bash
-git clone <repository-url>
-cd visionaree
-```
-
-2. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-3. Configure AWS credentials (if not already configured):
-```bash
-aws configure
-```
-
-## Usage
-
-### Basic Usage
+1) Install dependencies
 
 ```bash
-python main.py path/to/your/video.mp4
+cd infra
+npm install
 ```
 
-### Advanced Options
+2) Bootstrap your AWS environment (first time per account/region)
 
 ```bash
-python main.py path/to/your/video.mp4 --bucket your-s3-bucket --region us-west-2 --verbose
+npx cdk bootstrap
 ```
 
-### Command Line Arguments
+3) Build and deploy
 
-- `video_file`: Path to the video file to analyze (required)
-- `--bucket`: S3 bucket name (optional, will create one if not provided)
-- `--region`: AWS region (default: us-east-1)
-- `--verbose`: Enable verbose logging
-
-## Example Output
-
-```
-2025-09-20 10:30:15,123 - INFO - Initialized VideoAnalyzer with bucket: visionaree-videos-abc12345
-2025-09-20 10:30:16,456 - INFO - Uploading video to S3: /path/to/video.mp4
-2025-09-20 10:30:25,789 - INFO - Video uploaded successfully. S3 URI: s3://visionaree-videos-abc12345/videos/def67890_video.mp4
-2025-09-20 10:30:26,012 - INFO - Analyzing video with Bedrock Nova Lite: s3://visionaree-videos-abc12345/videos/def67890_video.mp4
-2025-09-20 10:30:35,345 - INFO - Video analysis completed successfully
-
-============================================================
-VIDEO ANALYSIS COMPLETE
-============================================================
-Video uploaded to: s3://visionaree-videos-abc12345/videos/def67890_video.mp4
-
-ANALYSIS DESCRIPTION:
-----------------------------------------
-The video shows a person walking through a parking lot during daylight hours. 
-The individual appears to be carrying a backpack and moves in a normal walking 
-pattern. There are several parked vehicles visible in the frame, and the 
-lighting conditions suggest it was recorded during mid-day hours.
-============================================================
+```bash
+npm run build
+npx cdk deploy
 ```
 
-## AWS Permissions
+After deploy, note the stack outputs (API URL, uploads/segments bucket names, etc.).
 
-Your AWS credentials need the following permissions:
+## Configure and run the frontend
 
-### S3 Permissions
-```json
-{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Effect": "Allow",
-            "Action": [
-                "s3:CreateBucket",
-                "s3:PutObject",
-                "s3:PutObjectAcl",
-                "s3:GetObject",
-                "s3:HeadBucket",
-                "s3:ListBucket"
-            ],
-            "Resource": [
-                "arn:aws:s3:::visionaree-videos-*",
-                "arn:aws:s3:::visionaree-videos-*/*"
-            ]
-        }
-    ]
-}
+1) Set the API URL used by the frontend requests. Currently this is a constant in `frontend/app/lib/video-service.ts`:
+
+- Update `API_BASE_URL` to your deployed API Gateway URL (e.g. `https://xxxx.execute-api.us-east-1.amazonaws.com/prod`).
+
+2) Install and run
+
+```bash
+cd ../frontend
+pnpm install
+pnpm dev
 ```
 
-### Bedrock Permissions
-```json
-{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Effect": "Allow",
-            "Action": [
-                "bedrock:InvokeModel"
-            ],
-            "Resource": "arn:aws:bedrock:*::foundation-model/amazon.nova-lite-v1:0"
-        }
-    ]
-}
-```
+Visit `http://localhost:3000`.
 
-## Supported Video Formats
+## Core features
 
-The application supports common video formats including:
-- MP4
-- MOV
-- AVI
-- MKV
+- Upload to S3 via presigned URL
+- Serverless video segmentation using FFmpeg in Lambda
+- Segment captioning and insights powered by Amazon Bedrock
+- Separate segments S3 bucket for generated parts
+- Job status tracking in DynamoDB with a simple GET status endpoint
+- Nuxt 3 UI for uploading, viewing, and querying videos
 
-## Error Handling
+## API summary
 
-The application includes comprehensive error handling for:
-- Missing AWS credentials
-- File not found errors
-- S3 upload failures
-- Bedrock model invocation errors
-- Network connectivity issues
+See `API_DOCUMENTATION.md` for full details. Main routes:
 
-## Logging
+- `POST /presigned-url` — Request a presigned URL to upload a video
+- `GET /video/{jobId}/status` — Poll job status: `{ "status": "pending|processing|done|error" }`
+- `POST /video/{jobId}/ask` — Ask a question about the analyzed video; returns AI insights and filtered segments
+- `GET /health` — Health check
 
-The application uses Python's logging module with configurable levels:
-- INFO: General operation information
-- DEBUG: Detailed debugging information (use `--verbose` flag)
-- ERROR: Error messages and exceptions
+Note: The query endpoint reads the prompt from the JSON body as `{ "query": "..." }` and returns only AI analysis data (insights and relevant segments).
 
-## License
+## Implementation notes
 
-This project is licensed under the MIT License.
+- FFmpeg is provided via a Lambda layer (configured in the CDK stack).
+- The S3 event processor limits Bedrock concurrency (ThreadPoolExecutor) for reliability.
+- A dedicated segments S3 bucket stores generated segment files (bucket name is passed to the processor Lambda via `SEGMENTS_BUCKET_NAME`).
+- DynamoDB serialization uses a custom encoder to handle Decimals where needed.
+- IAM permissions for `bedrock:InvokeModel` are granted to the query handler Lambda via the CDK stack.
+
+## Troubleshooting
+
+- Bedrock AccessDenied: ensure the Lambda role includes `bedrock:InvokeModel` for the target model/region.
+- 403/CORS issues in the browser: verify API Gateway CORS settings and allowed origins.
+- Processing appears stuck: check CloudWatch logs for the S3 event processor Lambda; verify S3 event notifications are correctly wired.
+- Large files: Lambda timeouts or memory may need tuning; segmenting is done in parts to keep within limits.
+
+## Development tips
+
+- Frontend: Nuxt 3 with `pnpm dev` for hot reload. UI components are under `frontend/app/components`.
+- Backend: Lambdas live in `backend/`. They are packaged/deployed by the CDK stack in `infra/`.
+- Infra: The CDK app is in `infra/lib/backend-stack.ts`. Update environment variables, permissions, and wiring here.
