@@ -10,7 +10,14 @@ import boto3
 import logging
 import os
 from typing import Dict, Any, List
+from decimal import Decimal
 from segment_caption_update import list_job_segment_captions
+
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, Decimal):
+            return str(obj)
+        return json.JSONEncoder.default(self, obj)
 
 # Configure logging
 logger = logging.getLogger()
@@ -76,7 +83,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 'Access-Control-Allow-Headers': 'Content-Type,Authorization',
                 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
             },
-            'body': json.dumps(segments_result, indent=2)
+            'body': json.dumps(segments_result, indent=2, cls=DecimalEncoder)
         }
         
     except Exception as e:
