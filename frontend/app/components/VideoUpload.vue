@@ -138,8 +138,6 @@ const handleFileSelect = async (event: Event) => {
     isUploading.value = true
     uploadProgress.value = 0
 
-    toast(`Starting upload of ${file.name}...`)
-
     // Simulate progress for UI feedback while processing happens in background
     const progressInterval = setInterval(() => {
       uploadProgress.value += Math.random() * 20
@@ -211,8 +209,6 @@ const handleDrop = async (event: DragEvent) => {
   try {
     isUploading.value = true
     uploadProgress.value = 0
-
-    toast(`Starting upload of ${file.name}...`)
 
     // Simulate progress for UI feedback while processing happens in background
     const progressInterval = setInterval(() => {

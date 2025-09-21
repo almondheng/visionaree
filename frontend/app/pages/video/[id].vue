@@ -71,11 +71,9 @@
               <div
                 class="bg-gray-100 dark:bg-gray-800 relative overflow-hidden rounded-lg h-full"
               >
-                <!-- Video player for completed videos -->
+                <!-- Video player for ready videos -->
                 <video
-                  v-if="
-                    video.processingStatus === 'completed' && video.videoBlob
-                  "
+                  v-if="video.processingStatus === 'ready' && video.videoBlob"
                   ref="videoPlayer"
                   class="w-full h-full object-contain"
                   autoplay
@@ -93,9 +91,7 @@
 
                 <!-- Video progress overlay -->
                 <div
-                  v-if="
-                    video.processingStatus === 'completed' && video.videoBlob
-                  "
+                  v-if="video.processingStatus === 'ready' && video.videoBlob"
                   class="absolute bottom-0 left-0 right-0 p-2"
                 >
                   <!-- Minimal progress bar -->
@@ -186,7 +182,10 @@
 
                 <!-- Processing overlay -->
                 <div
-                  v-if="video.processingStatus === 'processing'"
+                  v-if="
+                    video.processingStatus === 'processing' ||
+                    video.processingStatus === 'backend-processing'
+                  "
                   class="absolute inset-0 bg-black/50 flex items-center justify-center"
                 >
                   <div class="text-white text-center">
@@ -195,7 +194,11 @@
                     ></div>
                     <p class="text-lg">Processing video...</p>
                     <p class="text-sm text-gray-300">
-                      This may take a few minutes
+                      {{
+                        video.processingStatus === 'backend-processing'
+                          ? 'Analyzing video content for AI questions...'
+                          : 'This may take a few minutes'
+                      }}
                     </p>
                   </div>
                 </div>
@@ -238,11 +241,17 @@
 
         <!-- Video prompt section -->
         <div class="xl:col-span-1 h-full max-h-[500px]">
+          <!-- Show skeleton loader when backend is not ready -->
+          <VideoPromptSkeleton v-if="video?.id && !isBackendReady" />
+
+          <!-- Show actual prompt when backend is ready -->
           <VideoPrompt
-            v-if="video?.id"
+            v-else-if="video?.id && isBackendReady"
             :video-id="video.id"
             @seek-to-timestamp="seekToTimestamp"
           />
+
+          <!-- Loading fallback -->
           <div v-else class="h-full flex items-center justify-center">
             <p class="text-muted-foreground">Loading video...</p>
           </div>
@@ -309,7 +318,7 @@
               <Button
                 variant="outline"
                 @click="downloadVideo"
-                :disabled="video?.processingStatus !== 'completed'"
+                :disabled="video?.processingStatus !== 'ready'"
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -367,8 +376,10 @@ import {
   CardTitle,
 } from '~/components/ui/card'
 import VideoPrompt from '~/components/VideoPrompt.vue'
+import VideoPromptSkeleton from '~/components/VideoPromptSkeleton.vue'
 import { Slider } from '~/components/ui/slider'
 import { videoProcessingService } from '~/lib/video-service'
+import { useVideoStatusPolling } from '~/composables/useVideoStatusPolling'
 import type { VideoRecord } from '~/lib/db'
 
 // Router
@@ -380,6 +391,10 @@ const video = ref<VideoRecord | null>(null)
 const isLoading = ref(true)
 const error = ref(false)
 const videoPlayer = ref<HTMLVideoElement>()
+
+// Use global video status polling
+const { isVideoProcessing } = useVideoStatusPolling()
+const isBackendReady = computed(() => video.value?.processingStatus === 'ready')
 
 // Video overlay state
 const currentTime = ref(0)
@@ -401,7 +416,7 @@ watch(
   [video, videoPlayer],
   async () => {
     if (
-      video.value?.processingStatus === 'completed' &&
+      video.value?.processingStatus === 'ready' &&
       video.value?.videoBlob &&
       videoPlayer.value
     ) {
@@ -440,7 +455,7 @@ const loadVideo = async () => {
     video.value = videoData
 
     // Set up video player if video is ready
-    if (videoData.processingStatus === 'completed' && videoData.videoBlob) {
+    if (videoData.processingStatus === 'ready' && videoData.videoBlob) {
       await nextTick()
       console.log('Video is completed, setting up player...')
       setupVideoPlayer()
@@ -499,16 +514,6 @@ const onTimeUpdate = useThrottleFn(() => {
   if (videoPlayer.value && videoPlayer.value.duration) {
     currentTime.value = videoPlayer.value.currentTime
     progress.value = [videoPlayer.value.currentTime]
-
-    const progressPercent =
-      (videoPlayer.value.currentTime / videoPlayer.value.duration) * 100
-    // Could emit progress for future annotation features
-    const currentTimeInSeconds = videoPlayer.value.currentTime
-    console.log(
-      `Video progress: ${progressPercent.toFixed(
-        1
-      )}% (${currentTimeInSeconds.toFixed()}s)`
-    )
   }
 }, 500)
 
@@ -619,7 +624,7 @@ const startAutoRefresh = () => {
 }
 
 const seekToTimestamp = (timestamp: number) => {
-  if (videoPlayer.value && video.value?.processingStatus === 'completed') {
+  if (videoPlayer.value && video.value?.processingStatus === 'ready') {
     videoPlayer.value.currentTime = timestamp
     videoPlayer.value.play().catch(err => {
       console.error('Error playing video:', err)

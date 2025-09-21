@@ -115,6 +115,29 @@ export async function queryVideo(
   return await response.json()
 }
 
+// Types for video status check
+interface VideoStatusResponse {
+  status: 'done' | 'processing' | 'pending' | 'error'
+}
+
+export async function checkVideoStatus(jobId: string): Promise<VideoStatusResponse> {
+  const response = await fetch(`${API_BASE_URL}/video/${jobId}/status`, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  })
+
+  if (!response.ok) {
+    const errorData = await response
+      .json()
+      .catch(() => ({ error: 'Unknown error' }))
+    throw new Error(errorData.error || `HTTP error! status: ${response.status}`)
+  }
+
+  return await response.json()
+}
+
 export async function uploadFileToS3(
   presignedUrl: string,
   file: File,
@@ -293,6 +316,19 @@ export class VideoProcessingService {
     } catch (error) {
       console.error(`Failed to retry processing for video ${id}:`, error)
       throw new Error('Failed to retry processing')
+    }
+  }
+
+  async checkBackendStatus(videoId: string): Promise<'done' | 'processing' | 'pending' | 'error'> {
+    try {
+      // Use the format: upload-{videoId} for the job ID as defined in uploadVideoToS3
+      const jobId = `upload-${videoId}`
+      const statusResponse = await checkVideoStatus(jobId)
+      return statusResponse.status
+    } catch (error) {
+      console.error(`Failed to check backend status for video ${videoId}:`, error)
+      // Return 'processing' as default to keep polling
+      return 'processing'
     }
   }
 }
