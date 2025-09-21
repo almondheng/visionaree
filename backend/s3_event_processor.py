@@ -10,6 +10,7 @@ from botocore.exceptions import ClientError
 from typing import Dict, Any, List
 import logging
 from urllib.parse import unquote_plus
+from summarize import summarize_clip
 
 # Configure logging
 logger = logging.getLogger()
@@ -223,6 +224,23 @@ def process_video_upload(bucket_name: str, object_key: str, job_id: str,
             for segment_url in segment_result.get('segments', []):
                 logger.info(f"  Created segment: {segment_url}")
         
+        # Step 5: Summarize video segments using Bedrock Nova
+        summarization_result = {'success': False, 'total_segments': 0, 'processed_segments': 0, 'results': []}
+        if not segment_result.get('error') and segment_result.get('segments'):
+            logger.info("Step 5: Summarizing video segments using Amazon Bedrock Nova...")
+            summarization_result = summarize_video_segments(
+                job_id=job_id, 
+                uploaded_segments=segment_result.get('segments', []),
+                segment_duration=segment_result.get('segment_duration', 5)
+            )
+            
+            if summarization_result.get('success'):
+                logger.info(f"Successfully summarized {summarization_result.get('successful_segments', 0)}/{summarization_result.get('total_segments', 0)} segments")
+            else:
+                logger.error(f"Video summarization failed: {summarization_result.get('error', 'Unknown error')}")
+        else:
+            logger.info("Step 5: Skipping video summarization (no segments to process)")
+        
         # TODO: 4. Trigger video analysis workflow
         # - Queue the video for Bedrock Nova Lite analysis
         # - Send message to SQS queue for batch processing
@@ -246,8 +264,8 @@ def process_video_upload(bucket_name: str, object_key: str, job_id: str,
         logger.info("✓ 2. Video metadata extraction with FFmpeg")
         logger.info("✓ 3. Metadata logged to CloudWatch")
         logger.info("✓ 4. Video split into segments")
-        logger.info("TODO: 5. Generate video thumbnails")
-        logger.info("TODO: 6. Trigger video analysis workflow")
+        logger.info(f"✓ 5. Video summarization using Bedrock Nova ({'successful' if summarization_result.get('success') else 'failed'})")
+        logger.info("TODO: 6. Generate video thumbnails")
         logger.info("TODO: 7. Generate preview clips")
         logger.info("TODO: 8. Update job status")
         logger.info("TODO: 9. Content validation")
@@ -277,13 +295,22 @@ def process_video_upload(bucket_name: str, object_key: str, job_id: str,
                 'segments': segment_result.get('segments', []),
                 'error': segment_result.get('error')
             },
+            'summarization': {
+                'success': summarization_result.get('success', False),
+                'total_segments': summarization_result.get('total_segments', 0),
+                'processed_segments': summarization_result.get('processed_segments', 0),
+                'successful_segments': summarization_result.get('successful_segments', 0),
+                'failed_segments': summarization_result.get('failed_segments', 0),
+                'results': summarization_result.get('results', []),
+                'error': summarization_result.get('error')
+            },
             'processingSteps': [
                 {'step': 'file_validation', 'status': 'completed'},
                 {'step': 'metadata_extraction', 'status': 'completed'},
                 {'step': 'metadata_logging', 'status': 'completed'},
                 {'step': 'video_segmentation', 'status': 'completed' if not segment_result.get('error') else 'failed'},
+                {'step': 'video_summarization', 'status': 'completed' if summarization_result.get('success') else 'failed'},
                 {'step': 'thumbnail_generation', 'status': 'pending'},
-                {'step': 'analysis_trigger', 'status': 'pending'},
                 {'step': 'preview_generation', 'status': 'pending'},
                 {'step': 'status_update', 'status': 'pending'},
                 {'step': 'content_validation', 'status': 'pending'}
@@ -295,6 +322,8 @@ def process_video_upload(bucket_name: str, object_key: str, job_id: str,
             logger.info(f"Video metadata: {processing_result['metadata']['duration']:.2f}s, {processing_result['metadata']['resolution']}, {processing_result['metadata']['video_codec']}")
         if not segment_result.get('error'):
             logger.info(f"Video segmentation: {segment_result.get('uploaded_segments', 0)}/{segment_result.get('total_segments', 0)} segments uploaded")
+        if summarization_result.get('success'):
+            logger.info(f"Video summarization: {summarization_result.get('successful_segments', 0)}/{summarization_result.get('total_segments', 0)} segments summarized")
         
         return processing_result
         
@@ -788,6 +817,133 @@ def upload_segment_to_s3(task_args) -> str:
     except Exception as e:
         logger.error(f"Failed to upload segment {Path(segment_path).name}: {str(e)}")
         raise
+
+
+def summarize_video_segments(job_id: str, uploaded_segments: List[str], segment_duration: int = 5) -> Dict[str, Any]:
+    """
+    Process all video segments through Bedrock for summarization.
+    
+    Args:
+        job_id: Analysis job ID
+        uploaded_segments: List of S3 URLs for uploaded segments
+        segment_duration: Duration of each segment in seconds
+        
+    Returns:
+        Dict containing summarization results
+    """
+    try:
+        logger.info(f"Starting video summarization for {len(uploaded_segments)} segments")
+        
+        # Extract start times from segment URLs and create mapping
+        # URL format: s3://bucket/videos/{job_id}/segments/{start_time}.mp4
+        segment_mapping = {}  # start_time -> s3_uri
+        for segment_url in uploaded_segments:
+            try:
+                # Extract start time from filename
+                filename = Path(segment_url).name  # e.g., "10.mp4"
+                start_time = int(filename.split('.')[0])  # e.g., 10
+                segment_mapping[start_time] = segment_url
+            except (ValueError, IndexError) as e:
+                logger.warning(f"Could not parse start time from segment URL {segment_url}: {str(e)}")
+                continue
+        
+        # Sort segments by start time
+        segment_times = sorted(segment_mapping.keys())
+        
+        if not segment_times:
+            logger.error("No valid segment times found")
+            return {
+                'success': False,
+                'error': 'No valid segment times found',
+                'total_segments': len(uploaded_segments),
+                'processed_segments': 0,
+                'results': []
+            }
+        
+        logger.info(f"Processing {len(segment_times)} segments: {segment_times}")
+        
+        # Process segments concurrently (but limit concurrency for Lambda)
+        results = []
+        max_workers = min(3, len(segment_times))  # Conservative limit for Bedrock API
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all summarization tasks
+            future_to_time = {
+                executor.submit(summarize_clip, segment_mapping[start_time], job_id, start_time): start_time 
+                for start_time in segment_times
+            }
+            
+            # Collect results as they complete
+            for future in as_completed(future_to_time):
+                start_time = future_to_time[future]
+                try:
+                    result = future.result()
+                    results.append(result)
+                    if result["status"] == "success":
+                        logger.info(f"✓ Summarized segment {result['start_time']}: {result['caption']}")
+                        # Print detailed inference result
+                        print(f"🔍 BEDROCK INFERENCE RESULT - Segment {result['start_time']}s:")
+                        print(f"   Job ID: {result['job_id']}")
+                        print(f"   Caption: {result['caption']}")
+                        print(f"   Status: {result['status']}")
+                        print("---")
+                    else:
+                        logger.error(f"✗ Failed to summarize segment {result['start_time']}: {result.get('error', 'Unknown error')}")
+                        print(f"❌ BEDROCK INFERENCE FAILED - Segment {result['start_time']}s:")
+                        print(f"   Job ID: {result['job_id']}")
+                        print(f"   Error: {result.get('error', 'Unknown error')}")
+                        print(f"   Status: {result['status']}")
+                        print("---")
+                except Exception as e:
+                    logger.error(f"✗ Exception summarizing segment {start_time}: {str(e)}")
+                    results.append({
+                        "job_id": job_id,
+                        "start_time": start_time,
+                        "caption": None,
+                        "status": "error",
+                        "error": str(e),
+                    })
+        
+        # Sort results by start time
+        results.sort(key=lambda x: x["start_time"])
+        
+        success_count = sum(1 for r in results if r["status"] == "success")
+        
+        logger.info(f"Video summarization completed: {success_count}/{len(results)} segments processed successfully")
+        
+        # Print all results for now (as requested)
+        print("\n" + "="*80)
+        print("🎬 VIDEO SEGMENT SUMMARIES - BEDROCK INFERENCE RESULTS")
+        print("="*80)
+        for result in results:
+            if result["status"] == "success":
+                print(f"⏱️  Segment {result['start_time']}s → {result['caption']}")
+                logger.info(f"Segment {result['start_time']}s: {result['caption']}")
+            else:
+                print(f"❌ Segment {result['start_time']}s → ERROR: {result.get('error', 'Unknown error')}")
+                logger.info(f"Segment {result['start_time']}s: ERROR - {result.get('error', 'Unknown error')}")
+        print("="*80)
+        print(f"📊 Summary: {success_count} successful, {len(results) - success_count} failed out of {len(results)} total segments")
+        print("="*80 + "\n")
+        
+        return {
+            'success': True,
+            'total_segments': len(segment_times),
+            'processed_segments': len(results),
+            'successful_segments': success_count,
+            'failed_segments': len(results) - success_count,
+            'results': results
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in video summarization workflow: {str(e)}")
+        return {
+            'success': False,
+            'error': str(e),
+            'total_segments': len(uploaded_segments) if uploaded_segments else 0,
+            'processed_segments': 0,
+            'results': []
+        }
 
 
 def trigger_analysis_workflow(bucket_name: str, object_key: str, job_id: str) -> bool:
