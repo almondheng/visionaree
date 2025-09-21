@@ -12,7 +12,7 @@
     <main>
       <NuxtPage />
     </main>
-    <Toaster />
+    <Toaster richColors />
   </div>
 </template>
 

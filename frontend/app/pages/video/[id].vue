@@ -244,6 +244,7 @@
           <!-- Show actual prompt when backend is ready -->
           <VideoPrompt
             v-else-if="video?.id && isBackendReady"
+            ref="videoPromptRef"
             :video-id="video.id"
             @seek-to-timestamp="seekToTimestamp"
           />
@@ -404,6 +405,10 @@ const progress = ref([0])
 let refreshInterval: ReturnType<typeof setInterval> | null = null
 let statusPollingInterval: ReturnType<typeof setInterval> | null = null
 
+// Auto-prompting state
+const hasAutoPrompted = ref(false)
+const videoPromptRef = ref<InstanceType<typeof VideoPrompt> | null>(null)
+
 // Lifecycle
 onMounted(async () => {
   await loadVideo()
@@ -428,6 +433,33 @@ watch(
   { immediate: false }
 )
 
+// Watch for backend status changes to trigger auto-prompting
+watch(
+  backendStatus,
+  async (newStatus, oldStatus) => {
+    if (
+      newStatus === 'done' &&
+      oldStatus !== 'done' &&
+      !hasAutoPrompted.value &&
+      videoPromptRef.value
+    ) {
+      console.log('Backend is ready, triggering auto-prompt...')
+      hasAutoPrompted.value = true
+      
+      // Wait a bit for the VideoPrompt component to be fully mounted
+      await nextTick()
+      
+      try {
+        // Trigger the example prompt automatically
+        await videoPromptRef.value.submitSuggestedPrompt('Identify suspicious activities')
+        toast('Auto-analyzing video for suspicious activities...')
+      } catch (error) {
+        console.error('Failed to trigger auto-prompt:', error)
+      }
+    }
+  }
+)
+
 onBeforeUnmount(() => {
   if (refreshInterval) {
     clearInterval(refreshInterval)
@@ -446,6 +478,7 @@ const loadVideo = async () => {
   try {
     isLoading.value = true
     error.value = false
+    hasAutoPrompted.value = false // Reset auto-prompt flag for new video
 
     const videoId = route.params.id as string
     const videoData = await videoProcessingService.getVideo(videoId)

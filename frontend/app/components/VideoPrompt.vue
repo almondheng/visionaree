@@ -244,6 +244,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -347,6 +348,23 @@ async function submitPrompt() {
       totalRelevantSegments: apiResponse.ai_analysis.total_relevant_segments,
     })
 
+    // Check for high risk segments and show red toast if found
+    const highRiskSegments = segments.filter(
+      segment => segment.threat_level === 'high'
+    )
+    if (highRiskSegments.length > 0) {
+      toast.warning(
+        `High Risk Alert: ${highRiskSegments.length} high-risk segment${
+          highRiskSegments.length > 1 ? 's' : ''
+        } detected!`,
+        {
+          description:
+            'Review the flagged segments for potential security concerns.',
+          duration: 6000,
+        }
+      )
+    }
+
     // Clear the input
     promptText.value = ''
   } catch (error) {
@@ -364,4 +382,9 @@ async function submitPrompt() {
     isLoading.value = false
   }
 }
+
+// Expose methods for parent components
+defineExpose({
+  submitSuggestedPrompt,
+})
 </script>
