@@ -321,30 +321,54 @@ def get_job_status(job_id: str) -> Dict[str, Any]:
         return None
 
 
-system_prompt = """You are an AI assistant that helps users find relevant video segments of surveillance footage and provides insights based on their queries. 
+system_prompt = """You are an expert video surveillance analyst with specialized knowledge in security assessment and threat detection. Your role is to analyze video segment captions from surveillance footage and provide actionable insights based on user queries.
 
-You will be given:
-1. A list of video segments with timestamps and captions
-2. A user query
+## Context
+You are analyzing segments from surveillance video footage. Each segment contains:
+- A unique segment_id (integer starting from 0)
+- A start_time (in seconds from video beginning)
+- A caption (AI-generated description of what's happening in that segment)
 
-Your task is to:
-1. Identify the most relevant segments that answer or relate to the user's query
-2. Provide a concise summary of insights based on the relevant segments
-3. Return the results in the specified JSON format
+## Analysis Guidelines
 
-Return your response as a JSON with this exact structure:
+### Relevance Assessment
+- Only include segments that directly address or relate to the user's query
+- Consider both explicit matches (direct mentions) and implicit relevance (related activities/contexts)
+- Prioritize segments with clear, actionable information over vague descriptions
+- If no segments are relevant, return an empty relevant_segments array
+
+### Threat Level Classification
+- **HIGH**: Immediate security concerns, suspicious behavior, potential crimes, emergencies, unauthorized access
+- **MEDIUM**: Unusual activities, policy violations, maintenance issues, crowd gatherings
+- **LOW**: Normal activities that happen to match the query, routine observations
+
+### Insights Generation
+- Provide a comprehensive summary that synthesizes information across relevant segments
+- Include temporal patterns (when events occurred)
+- Highlight any security implications or recommendations
+- Note any data limitations or gaps in coverage
+- Use clear, professional language suitable for security personnel
+- DO NOT mention the segment_id
+
+## Response Format
+Return ONLY a valid JSON object with this exact structure:
 {
     "relevant_segments": [
         {
-            "segment_id": <number>,
-            "relevance_reason": "<brief explanation>",
-            "threat_level": <"low", "medium", "high">
+            "segment_id": <integer>,
+            "relevance_reason": "<clear, specific explanation of why this segment matches the query>",
+            "threat_level": "<low|medium|high>"
         }
     ],
-    "insights": "<comprehensive summary of findings>"
+    "insights": "<detailed summary of findings, patterns, and security implications>"
 }
 
-Only include segments that are actually relevant to the query. Be selective and focus on quality over quantity."""
+## Quality Standards
+- Be selective: quality over quantity in segment selection
+- Provide specific, actionable relevance reasons
+- Ensure insights add value beyond just listing segment contents
+- Maintain consistency in threat level assessment
+- Handle edge cases gracefully (no segments, unclear queries, etc.)"""
 
 
 def filter_segments_with_nova_pro(
@@ -372,22 +396,44 @@ def filter_segments_with_nova_pro(
                 }
             )
 
-        user_prompt = f"""Query: {query}
+        # Format segments for better readability
+        formatted_segments = []
+        for segment in segments_context:
+            start_time = segment["start_time"]
+            minutes = int(start_time // 60)
+            seconds = int(start_time % 60)
+            formatted_segments.append(
+                f"Segment {segment['segment_id']}: [{minutes:02d}:{seconds:02d}] {segment['caption']}"
+            )
 
-Video Segments:
-{json.dumps(segments_context, indent=2)}
+        segments_text = "\n".join(formatted_segments)
 
-Please analyze these segments and provide relevant results based on the query.
-Return only the JSON response as specified in the system prompt, no extra text."""
+        user_prompt = f"""## Analysis Request
 
-        # Prepare the request for Nova Pro
+**User Query:** "{query}"
+
+**Video Segments Available for Analysis:**
+Total segments: {len(segments_context)}
+
+{segments_text}
+
+## Instructions
+Analyze the above video segments in the context of the user query. Focus on:
+1. Direct relevance to the query subject matter
+2. Security implications and threat assessment  
+3. Temporal patterns or sequences of events
+4. Any notable behaviors or anomalies
+
+Return your analysis as a JSON object following the exact format specified in the system prompt. Include only segments that genuinely relate to the query."""
+
+        # Prepare the request for Nova Pro with optimized parameters for analysis
         request_body = {
             "system": [{"text": system_prompt}],
             "messages": [{"role": "user", "content": [{"text": user_prompt}]}],
             "inferenceConfig": {
-                "max_new_tokens": 4000,
-                "temperature": 0.1,
-                "top_p": 0.9,
+                "max_new_tokens": 3000,  # Reduced for more focused responses
+                "temperature": 0.0,  # Deterministic for consistent analysis
+                "top_p": 0.8,  # Balanced creativity/precision
             },
         }
 
@@ -411,37 +457,63 @@ Return only the JSON response as specified in the system prompt, no extra text."
 
             # Try to parse the JSON response
             try:
-                ai_response = json.loads(content)
+                # Clean the response to handle potential formatting issues
+                content_cleaned = content.strip()
+                if content_cleaned.startswith("```json"):
+                    content_cleaned = content_cleaned[7:]
+                if content_cleaned.endswith("```"):
+                    content_cleaned = content_cleaned[:-3]
+                content_cleaned = content_cleaned.strip()
 
-                # Map the AI response back to original segments
+                ai_response = json.loads(content_cleaned)
+
+                # Validate response structure
+                if not isinstance(ai_response, dict):
+                    raise ValueError("Response is not a JSON object")
+
+                if "relevant_segments" not in ai_response:
+                    ai_response["relevant_segments"] = []
+
+                if "insights" not in ai_response:
+                    ai_response["insights"] = "No insights provided"
+
+                # Map the AI response back to original segments with validation
                 filtered_segments = []
                 for relevant_seg in ai_response.get("relevant_segments", []):
                     segment_id = relevant_seg.get("segment_id")
-                    if 0 <= segment_id < len(segments):
-                        original_segment = segments[segment_id].copy()
-                        original_segment["relevance_score"] = relevant_seg.get(
-                            "relevance_score", 0
-                        )
-                        original_segment["relevance_reason"] = relevant_seg.get(
-                            "relevance_reason", ""
-                        )
-                        original_segment["threat_level"] = relevant_seg.get(
-                            "threat_level", ""
-                        )
-                        filtered_segments.append(original_segment)
+                    if segment_id is None:
+                        logger.warning("Segment missing segment_id, skipping")
+                        continue
+
+                    if not (0 <= segment_id < len(segments)):
+                        logger.warning(f"Invalid segment_id {segment_id}, skipping")
+                        continue
+
+                    original_segment = segments[segment_id].copy()
+                    original_segment["relevance_reason"] = relevant_seg.get(
+                        "relevance_reason", "No reason provided"
+                    )
+                    threat_level = relevant_seg.get("threat_level", "").lower()
+                    if threat_level not in ["low", "medium", "high"]:
+                        threat_level = "low"  # Default to low if invalid
+                    original_segment["threat_level"] = threat_level
+                    filtered_segments.append(original_segment)
 
                 return {
                     "status": "success",
                     "filtered_segments": filtered_segments,
                     "insights": ai_response.get("insights", "No insights generated"),
                     "total_relevant_segments": len(filtered_segments),
+                    "query_processed": query,
                 }
 
-            except json.JSONDecodeError as e:
+            except (json.JSONDecodeError, ValueError) as e:
                 logger.error(f"Failed to parse Nova Pro JSON response: {str(e)}")
+                logger.error(f"Raw content: {content}")
                 return {
                     "status": "error",
-                    "message": "Failed to parse AI response",
+                    "message": f"Failed to parse AI response: {str(e)}",
+                    "raw_response": content[:500] if len(content) > 500 else content,
                 }
         else:
             logger.error("No output/message in Nova Pro response")
