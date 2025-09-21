@@ -13,6 +13,7 @@ import logging
 from urllib.parse import unquote_plus
 from summarize import summarize_clip
 from job_status_update import create_job_status_record, update_job_status_record
+from segment_caption_update import save_batch_segment_captions
 
 # Configure logging
 logger = logging.getLogger()
@@ -1008,13 +1009,25 @@ def summarize_video_segments(job_id: str, uploaded_segments: List[str], segment_
         print(f"📊 Summary: {success_count} successful, {len(results) - success_count} failed out of {len(results)} total segments")
         print("="*80 + "\n")
         
+        # Save inference results to DynamoDB VideoAnalysisTable
+        logger.info("Saving segment captions to DynamoDB VideoAnalysisTable...")
+        save_result = save_batch_segment_captions(results)
+        
+        if save_result['success']:
+            logger.info(f"✓ Successfully saved {save_result['saved_count']} segment captions to DynamoDB")
+        else:
+            logger.error(f"✗ Failed to save segment captions to DynamoDB: {save_result['failed_count']} failures")
+            for error in save_result.get('errors', []):
+                logger.error(f"  - {error}")
+        
         return {
             'success': True,
             'total_segments': len(segment_times),
             'processed_segments': len(results),
             'successful_segments': success_count,
             'failed_segments': len(results) - success_count,
-            'results': results
+            'results': results,
+            'dynamodb_save_result': save_result
         }
         
     except Exception as e:

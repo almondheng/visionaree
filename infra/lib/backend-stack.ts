@@ -12,6 +12,7 @@ export class BackendStack extends cdk.Stack {
   public readonly s3Bucket: s3.Bucket;
   public readonly presignedUrlFunction: lambda.Function;
   public readonly s3EventProcessor: lambda.Function;
+  public readonly videoQueryHandler: lambda.Function;
   public readonly api: apigateway.RestApi;
   public readonly videoAnalysisTable: dynamodb.Table;
   public readonly jobStatusTable: dynamodb.Table;
@@ -55,7 +56,7 @@ export class BackendStack extends cdk.Stack {
     this.videoAnalysisTable = new dynamodb.Table(this, 'VideoAnalysisTable', {
       tableName: `visionaree-video-analysis-${this.account}-${this.region}`,
       partitionKey: {
-        name: 'jobIdPartitionId',
+        name: 'jobId',
         type: dynamodb.AttributeType.STRING
       },
       sortKey: {
@@ -135,6 +136,20 @@ export class BackendStack extends cdk.Stack {
       ]
     });
 
+    // Create Lambda function for video query handling
+    this.videoQueryHandler = new lambda.Function(this, 'VideoQueryHandler', {
+      runtime: lambda.Runtime.PYTHON_3_11,
+      code: lambda.Code.fromAsset(path.join(__dirname, '../../backend')),
+      handler: 'video_query_handler.lambda_handler',
+      environment: {
+        DYNAMODB_TABLE_NAME: this.videoAnalysisTable.tableName,
+        JOB_STATUS_TABLE_NAME: this.jobStatusTable.tableName
+      },
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 512,
+      description: 'Handle video analysis queries and search requests'
+    });
+
     // Grant Lambda function permissions to generate presigned URLs for the S3 bucket
     this.s3Bucket.grantPut(this.presignedUrlFunction);
     this.s3Bucket.grantRead(this.presignedUrlFunction);
@@ -148,6 +163,10 @@ export class BackendStack extends cdk.Stack {
 
     // Grant S3 event processor permissions to write to job status table
     this.jobStatusTable.grantWriteData(this.s3EventProcessor);
+
+    // Grant video query handler permissions to read from DynamoDB tables
+    this.videoAnalysisTable.grantReadData(this.videoQueryHandler);
+    this.jobStatusTable.grantReadData(this.videoQueryHandler);
 
     // Additional IAM permissions for presigned URL generation
     this.presignedUrlFunction.addToRolePolicy(
@@ -283,6 +302,44 @@ export class BackendStack extends cdk.Stack {
       ]
     });
 
+    // Add video query endpoint: /video/{jobId}/ask
+    const videoResource = this.api.root.addResource('video');
+    const jobIdResource = videoResource.addResource('{jobId}');
+    const askResource = jobIdResource.addResource('ask');
+    
+    const videoQueryIntegration = new apigateway.LambdaIntegration(
+      this.videoQueryHandler,
+      {
+        requestTemplates: { 'application/json': '{ "statusCode": "200" }' }
+      }
+    );
+    
+    askResource.addMethod('POST', videoQueryIntegration, {
+      authorizationType: apigateway.AuthorizationType.NONE,
+      requestValidator: new apigateway.RequestValidator(this, 'VideoQueryRequestValidator', {
+        restApi: this.api,
+        validateRequestBody: true,
+        validateRequestParameters: false
+      }),
+      requestModels: {
+        'application/json': new apigateway.Model(this, 'VideoQueryRequestModel', {
+          restApi: this.api,
+          contentType: 'application/json',
+          schema: {
+            type: apigateway.JsonSchemaType.OBJECT,
+            properties: {
+              query: {
+                type: apigateway.JsonSchemaType.STRING,
+                minLength: 1,
+                description: 'Natural language question about the video content'
+              }
+            },
+            required: ['query']
+          }
+        })
+      }
+    });
+
     // Configure S3 bucket to send upload events to the processor Lambda
     this.s3Bucket.addEventNotification(
       s3.EventType.OBJECT_CREATED,
@@ -364,6 +421,16 @@ export class BackendStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'JobStatusTableName', {
       value: this.jobStatusTable.tableName,
       description: 'Name of the DynamoDB table for job status tracking'
+    });
+
+    new cdk.CfnOutput(this, 'VideoQueryEndpoint', {
+      value: `${this.api.url}video/{jobId}/ask`,
+      description: 'Video query API endpoint for asking questions about video content'
+    });
+
+    new cdk.CfnOutput(this, 'VideoQueryHandlerName', {
+      value: this.videoQueryHandler.functionName,
+      description: 'Name of the video query handler Lambda function'
     });
   }
 }
