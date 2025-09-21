@@ -32,7 +32,7 @@ def summarize_clip(job_id, start_time):
                         "Focus only on new or important actions or events. "
                         "Ignore background or static details unless they change. "
                         "If suspicious or unusual activities occur, describe them clearly. "
-                        "If nothing significant happens, say 'No activity'. "
+                        "If nothing significant happens, return empty string. "
                         "Return only the caption, no extra text."
                     )
                 },
