@@ -227,7 +227,7 @@
                     {{
                       video.duration
                         ? formatDuration(video.duration)
-                        : "Unknown"
+                        : 'Unknown'
                     }}
                   </p>
                 </div>
@@ -322,260 +322,265 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, nextTick, watch } from "vue";
-import { useRoute, useRouter } from "vue-router";
-import { toast } from "vue-sonner";
-import { Button } from "~/components/ui/button";
+import { ref, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { toast } from 'vue-sonner'
+import { Button } from '~/components/ui/button'
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "~/components/ui/card";
-import { videoProcessingService } from "~/lib/video-service";
-import type { VideoRecord } from "~/lib/db";
+} from '~/components/ui/card'
+import { videoProcessingService } from '~/lib/video-service'
+import type { VideoRecord } from '~/lib/db'
 
 // Router
-const route = useRoute();
-const router = useRouter();
+const route = useRoute()
+const router = useRouter()
 
 // Reactive state
-const video = ref<VideoRecord | null>(null);
-const isLoading = ref(true);
-const error = ref(false);
-const videoPlayer = ref<HTMLVideoElement>();
+const video = ref<VideoRecord | null>(null)
+const isLoading = ref(true)
+const error = ref(false)
+const videoPlayer = ref<HTMLVideoElement>()
 
 // Auto-refresh for processing status
-let refreshInterval: ReturnType<typeof setInterval> | null = null;
+let refreshInterval: ReturnType<typeof setInterval> | null = null
 
 // Lifecycle
 onMounted(async () => {
-  await loadVideo();
-  startAutoRefresh();
-});
+  await loadVideo()
+  startAutoRefresh()
+})
 
 // Watch for video changes and setup player
 watch(
   [video, videoPlayer],
   async () => {
     if (
-      video.value?.processingStatus === "completed" &&
+      video.value?.processingStatus === 'completed' &&
       video.value?.videoBlob &&
       videoPlayer.value
     ) {
-      await nextTick();
-      console.log("Watcher triggered - setting up video player");
-      setupVideoPlayer();
+      await nextTick()
+      console.log('Watcher triggered - setting up video player')
+      setupVideoPlayer()
     }
   },
   { immediate: false }
-);
+)
 
 onBeforeUnmount(() => {
   if (refreshInterval) {
-    clearInterval(refreshInterval);
+    clearInterval(refreshInterval)
   }
   // Clean up video blob URL if exists
   if (videoPlayer.value?.src) {
-    URL.revokeObjectURL(videoPlayer.value.src);
+    URL.revokeObjectURL(videoPlayer.value.src)
   }
-});
+})
 
 // Methods
 const loadVideo = async () => {
   try {
-    isLoading.value = true;
-    error.value = false;
+    isLoading.value = true
+    error.value = false
 
-    const videoId = route.params.id as string;
-    const videoData = await videoProcessingService.getVideo(videoId);
+    const videoId = route.params.id as string
+    const videoData = await videoProcessingService.getVideo(videoId)
 
     if (!videoData) {
-      error.value = true;
-      return;
+      error.value = true
+      return
     }
 
-    video.value = videoData;
+    video.value = videoData
 
     // Set up video player if video is ready
-    if (videoData.processingStatus === "completed" && videoData.videoBlob) {
-      await nextTick();
-      console.log("Video is completed, setting up player...");
-      setupVideoPlayer();
+    if (videoData.processingStatus === 'completed' && videoData.videoBlob) {
+      await nextTick()
+      console.log('Video is completed, setting up player...')
+      setupVideoPlayer()
     } else {
-      console.log("Video not ready for playback:", {
+      console.log('Video not ready for playback:', {
         status: videoData.processingStatus,
         hasBlob: !!videoData.videoBlob,
-      });
+      })
     }
   } catch (err) {
-    console.error("Error loading video:", err);
-    error.value = true;
+    console.error('Error loading video:', err)
+    error.value = true
   } finally {
-    isLoading.value = false;
+    isLoading.value = false
   }
-};
+}
 
 const setupVideoPlayer = () => {
   if (!video.value?.videoBlob || !videoPlayer.value) {
-    console.log("Cannot setup video player:", {
+    console.log('Cannot setup video player:', {
       hasBlob: !!video.value?.videoBlob,
       hasPlayerRef: !!videoPlayer.value,
-    });
-    return;
+    })
+    return
   }
 
   // Clean up existing URL if any
   if (videoPlayer.value.src) {
-    URL.revokeObjectURL(videoPlayer.value.src);
+    URL.revokeObjectURL(videoPlayer.value.src)
   }
 
   // Create object URL for the video blob
-  const videoUrl = URL.createObjectURL(video.value.videoBlob);
-  console.log("Setting video URL:", videoUrl);
-  videoPlayer.value.src = videoUrl;
+  const videoUrl = URL.createObjectURL(video.value.videoBlob)
+  console.log('Setting video URL:', videoUrl)
+  videoPlayer.value.src = videoUrl
 
   // Force load the video
-  videoPlayer.value.load();
-};
+  videoPlayer.value.load()
+}
 
 const onVideoLoaded = () => {
-  console.log("Video loaded successfully", {
+  console.log('Video loaded successfully', {
     duration: videoPlayer.value?.duration,
     videoWidth: videoPlayer.value?.videoWidth,
     videoHeight: videoPlayer.value?.videoHeight,
     readyState: videoPlayer.value?.readyState,
-  });
-};
+  })
+}
 
-const onTimeUpdate = () => {
+const onTimeUpdate = useThrottleFn(() => {
   if (videoPlayer.value && videoPlayer.value.duration) {
     const progress =
-      (videoPlayer.value.currentTime / videoPlayer.value.duration) * 100;
+      (videoPlayer.value.currentTime / videoPlayer.value.duration) * 100
     // Could emit progress for future annotation features
-    console.log(`Video progress: ${progress.toFixed(1)}%`);
+    const currentTimeInSeconds = videoPlayer.value.currentTime
+    console.log(
+      `Video progress: ${progress.toFixed(
+        1
+      )}% (${currentTimeInSeconds.toFixed()}s)`
+    )
   }
-};
+}, 500)
 
 const onVideoError = (event: Event) => {
-  console.error("Video error:", event, {
+  console.error('Video error:', event, {
     error: videoPlayer.value?.error,
     networkState: videoPlayer.value?.networkState,
     readyState: videoPlayer.value?.readyState,
-  });
-  toast("Error loading video");
-};
+  })
+  toast('Error loading video')
+}
 
 const onLoadStart = () => {
-  console.log("Video load started");
-};
+  console.log('Video load started')
+}
 
 const onCanPlay = () => {
-  console.log("Video can start playing");
-};
+  console.log('Video can start playing')
+}
 
 const startAnnotation = () => {
   // TODO: Navigate to annotation interface
-  toast("Annotation feature coming soon!");
-};
+  toast('Annotation feature coming soon!')
+}
 
 const downloadVideo = () => {
-  if (!video.value?.videoBlob) return;
+  if (!video.value?.videoBlob) return
 
-  const url = URL.createObjectURL(video.value.videoBlob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = video.value.filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  const url = URL.createObjectURL(video.value.videoBlob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = video.value.filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
 
-  toast("Download started");
-};
+  toast('Download started')
+}
 
 const deleteVideo = async () => {
-  if (!video.value?.id) return;
+  if (!video.value?.id) return
 
   const confirmed = confirm(
     `Are you sure you want to delete "${video.value.title}"?`
-  );
-  if (!confirmed) return;
+  )
+  if (!confirmed) return
 
   try {
-    await videoProcessingService.deleteVideo(video.value.id);
-    toast(`Video "${video.value.title}" deleted successfully`);
-    router.push("/");
+    await videoProcessingService.deleteVideo(video.value.id)
+    toast(`Video "${video.value.title}" deleted successfully`)
+    router.push('/')
   } catch (err) {
-    toast("Failed to delete video");
-    console.error("Delete error:", err);
+    toast('Failed to delete video')
+    console.error('Delete error:', err)
   }
-};
+}
 
 const retryProcessing = async () => {
-  if (!video.value?.id) return;
+  if (!video.value?.id) return
 
   try {
-    await videoProcessingService.retryProcessing(video.value.id);
-    toast("Retrying video processing...");
-    await loadVideo();
+    await videoProcessingService.retryProcessing(video.value.id)
+    toast('Retrying video processing...')
+    await loadVideo()
   } catch (err) {
-    toast("Failed to retry processing");
-    console.error("Retry error:", err);
+    toast('Failed to retry processing')
+    console.error('Retry error:', err)
   }
-};
+}
 
 const startAutoRefresh = () => {
   // Refresh video status every 5 seconds if processing
   refreshInterval = setInterval(async () => {
     if (
       video.value &&
-      (video.value.processingStatus === "processing" ||
-        video.value.processingStatus === "pending")
+      (video.value.processingStatus === 'processing' ||
+        video.value.processingStatus === 'pending')
     ) {
-      await loadVideo();
+      await loadVideo()
     }
-  }, 5000);
-};
+  }, 5000)
+}
 
 // Utility functions
 const formatFileSize = (bytes: number): string => {
-  if (bytes === 0) return "0 Bytes";
-  const k = 1024;
-  const sizes = ["Bytes", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
-};
+  if (bytes === 0) return '0 Bytes'
+  const k = 1024
+  const sizes = ['Bytes', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+}
 
 const formatDate = (date: Date): string => {
-  return new Intl.DateTimeFormat("en-US", {
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(date));
-};
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(date))
+}
 
 const formatDuration = (seconds: number): string => {
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const secs = Math.floor(seconds % 60);
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  const secs = Math.floor(seconds % 60)
 
   if (hours > 0) {
-    return `${hours}:${minutes.toString().padStart(2, "0")}:${secs
+    return `${hours}:${minutes.toString().padStart(2, '0')}:${secs
       .toString()
-      .padStart(2, "0")}`;
+      .padStart(2, '0')}`
   }
-  return `${minutes}:${secs.toString().padStart(2, "0")}`;
-};
+  return `${minutes}:${secs.toString().padStart(2, '0')}`
+}
 
 // Page metadata
 useHead({
   title: computed(() =>
-    video.value ? `${video.value.title} - Video Details` : "Video Details"
+    video.value ? `${video.value.title} - Video Details` : 'Video Details'
   ),
-  meta: [{ name: "description", content: "View and manage video details" }],
-});
+  meta: [{ name: 'description', content: 'View and manage video details' }],
+})
 </script>
