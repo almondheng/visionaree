@@ -5,6 +5,7 @@ import * as s3n from 'aws-cdk-lib/aws-s3-notifications';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as path from 'path';
 
 export class BackendStack extends cdk.Stack {
@@ -12,6 +13,8 @@ export class BackendStack extends cdk.Stack {
   public readonly presignedUrlFunction: lambda.Function;
   public readonly s3EventProcessor: lambda.Function;
   public readonly api: apigateway.RestApi;
+  public readonly videoAnalysisTable: dynamodb.Table;
+  public readonly jobStatusTable: dynamodb.Table;
 
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
@@ -48,6 +51,54 @@ export class BackendStack extends cdk.Stack {
       ]
     });
 
+    // Create DynamoDB table for video analysis results
+    this.videoAnalysisTable = new dynamodb.Table(this, 'VideoAnalysisTable', {
+      tableName: `visionaree-video-analysis-${this.account}-${this.region}`,
+      partitionKey: {
+        name: 'jobIdPartitionId',
+        type: dynamodb.AttributeType.STRING
+      },
+      sortKey: {
+        name: 'segmentStartTime',
+        type: dynamodb.AttributeType.NUMBER
+      },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: cdk.RemovalPolicy.RETAIN, // Keep table on stack deletion
+      pointInTimeRecovery: true,
+      encryption: dynamodb.TableEncryption.AWS_MANAGED
+    });
+
+    // Create DynamoDB table for job status tracking
+    this.jobStatusTable = new dynamodb.Table(this, 'JobStatusTable', {
+      tableName: `visionaree-job-status-${this.account}-${this.region}`,
+      partitionKey: {
+        name: 'jobId',
+        type: dynamodb.AttributeType.STRING
+      },
+      sortKey: {
+        name: 'uploadTimestamp',
+        type: dynamodb.AttributeType.STRING
+      },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: cdk.RemovalPolicy.RETAIN, // Keep table on stack deletion
+      pointInTimeRecovery: true,
+      encryption: dynamodb.TableEncryption.AWS_MANAGED
+    });
+
+    // Add Global Secondary Index for querying by status
+    this.jobStatusTable.addGlobalSecondaryIndex({
+      indexName: 'StatusIndex',
+      partitionKey: {
+        name: 'status',
+        type: dynamodb.AttributeType.STRING
+      },
+      sortKey: {
+        name: 'uploadTimestamp',
+        type: dynamodb.AttributeType.STRING
+      }
+    });
+
+
     // Create Lambda function for generating presigned URLs
     this.presignedUrlFunction = new lambda.Function(this, 'PresignedUrlFunction', {
       runtime: lambda.Runtime.PYTHON_3_11,
@@ -67,7 +118,9 @@ export class BackendStack extends cdk.Stack {
       code: lambda.Code.fromAsset(path.join(__dirname, '../../backend')),
       handler: 's3_event_processor.lambda_handler',
       environment: {
-        S3_BUCKET_NAME: this.s3Bucket.bucketName
+        S3_BUCKET_NAME: this.s3Bucket.bucketName,
+        DYNAMODB_TABLE_NAME: this.videoAnalysisTable.tableName,
+        JOB_STATUS_TABLE_NAME: this.jobStatusTable.tableName
       },
       timeout: cdk.Duration.minutes(10), // Increased timeout for FFmpeg processing
       memorySize: 2048, // Increased memory for video processing with FFmpeg
@@ -89,6 +142,12 @@ export class BackendStack extends cdk.Stack {
     // Grant S3 event processor permissions to read from S3 bucket
     this.s3Bucket.grantRead(this.s3EventProcessor);
     this.s3Bucket.grantWrite(this.s3EventProcessor); // For writing processed files back to S3
+
+    // Grant S3 event processor permissions to write to DynamoDB table
+    this.videoAnalysisTable.grantWriteData(this.s3EventProcessor);
+
+    // Grant S3 event processor permissions to write to job status table
+    this.jobStatusTable.grantWriteData(this.s3EventProcessor);
 
     // Additional IAM permissions for presigned URL generation
     this.presignedUrlFunction.addToRolePolicy(
@@ -121,6 +180,17 @@ export class BackendStack extends cdk.Stack {
           this.s3Bucket.bucketArn,
           `${this.s3Bucket.bucketArn}/*`
         ]
+      })
+    );
+
+    // Grant S3 event processor permissions to invoke Bedrock models
+    this.s3EventProcessor.addToRolePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          'bedrock:*'
+        ],
+        resources: ["*"]
       })
     );
 
@@ -284,6 +354,16 @@ export class BackendStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'S3EventProcessorName', {
       value: this.s3EventProcessor.functionName,
       description: 'Name of the S3 event processor Lambda function'
+    });
+
+    new cdk.CfnOutput(this, 'DynamoDBTableName', {
+      value: this.videoAnalysisTable.tableName,
+      description: 'Name of the DynamoDB table for video analysis results'
+    });
+
+    new cdk.CfnOutput(this, 'JobStatusTableName', {
+      value: this.jobStatusTable.tableName,
+      description: 'Name of the DynamoDB table for job status tracking'
     });
   }
 }

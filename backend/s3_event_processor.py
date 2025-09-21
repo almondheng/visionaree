@@ -4,6 +4,7 @@ import subprocess
 import shlex
 import os
 import tempfile
+import time
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from botocore.exceptions import ClientError
@@ -11,6 +12,7 @@ from typing import Dict, Any, List
 import logging
 from urllib.parse import unquote_plus
 from summarize import summarize_clip
+from job_status_update import create_job_status_record, update_job_status_record
 
 # Configure logging
 logger = logging.getLogger()
@@ -21,6 +23,7 @@ s3_client = boto3.client('s3')
 
 # FFmpeg path in Lambda layer
 FFMPEG_PATH = '/opt/bin/ffmpeg'
+
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
@@ -179,6 +182,25 @@ def process_video_upload(bucket_name: str, object_key: str, job_id: str,
             logger.error(f"Failed to get object metadata: {str(e)}")
             raise
         
+        # Create upload timestamp for job tracking
+        upload_timestamp = last_modified.isoformat() if last_modified else None
+        if not upload_timestamp:
+            from datetime import datetime
+            upload_timestamp = datetime.utcnow().isoformat() + 'Z'
+        
+        # Create initial job status record
+        initial_metadata = {
+            'filename': filename,
+            's3_uri': f"s3://{bucket_name}/{object_key}",
+            'size': file_size,
+            'content_type': content_type,
+            'duration': 0,  # Will be updated after metadata extraction
+            'resolution': 'unknown',
+            'video_codec': 'unknown'
+        }
+        
+        create_job_status_record(job_id, upload_timestamp, initial_metadata)
+        
         # TODO: Implement video processing logic
         # This is where you would add your video processing steps:
         
@@ -188,6 +210,12 @@ def process_video_upload(bucket_name: str, object_key: str, job_id: str,
         
         if not validation_result.get('valid', False):
             logger.error(f"Video validation failed: {validation_result.get('message', 'Unknown error')}")
+            
+            # Update job status to failed
+            update_job_status_record(job_id, upload_timestamp, 'failed', {
+                'errorMessage': validation_result.get('error', 'Validation failed')
+            })
+            
             return {
                 'jobId': job_id,
                 'filename': filename,
@@ -213,16 +241,42 @@ def process_video_upload(bucket_name: str, object_key: str, job_id: str,
         logger.info(json.dumps(metadata, indent=2))
         logger.info("=== End Metadata ===")
         
+        # Update job status with video metadata
+        if not metadata.get('error'):
+            video_duration = metadata.get('file_info', {}).get('duration', 0)
+            video_info = metadata.get('video_info', {})
+            resolution = f"{video_info.get('width', 0)}x{video_info.get('height', 0)}" if video_info else 'unknown'
+            video_codec = video_info.get('codec_name', 'unknown') if video_info else 'unknown'
+            
+            update_job_status_record(job_id, upload_timestamp, 'pending', {
+                'videoDuration': video_duration,
+                'metadata': {
+                    'resolution': resolution,
+                    'codec': video_codec,
+                    'contentType': content_type
+                }
+            })
+        
         # Step 4: Split video into segments
         logger.info("Step 4: Splitting video into 5-second segments...")
         segment_result = split_video_into_segments(bucket_name, object_key, job_id)
         
         if segment_result.get('error'):
             logger.error(f"Video splitting failed: {segment_result.get('error')}")
+            update_job_status_record(job_id, upload_timestamp, 'failed', {
+                'error': f"Video splitting failed: {segment_result.get('error')}"
+            })
         else:
             logger.info(f"Successfully created {len(segment_result.get('segments', []))} video segments")
             for segment_url in segment_result.get('segments', []):
                 logger.info(f"  Created segment: {segment_url}")
+            
+            # Update job status with segment count
+            update_job_status_record(job_id, upload_timestamp, 'pending', {
+                'totalSegments': len(segment_result.get('segments', [])),
+                'processedSegments': 0,
+                'segments': segment_result.get('segments', [])
+            })
         
         # Step 5: Summarize video segments using Bedrock Nova
         summarization_result = {'success': False, 'total_segments': 0, 'processed_segments': 0, 'results': []}
@@ -236,10 +290,29 @@ def process_video_upload(bucket_name: str, object_key: str, job_id: str,
             
             if summarization_result.get('success'):
                 logger.info(f"Successfully summarized {summarization_result.get('successful_segments', 0)}/{summarization_result.get('total_segments', 0)} segments")
+                # Update job status to done with final results
+                update_job_status_record(job_id, upload_timestamp, 'done', {
+                    'processedSegments': summarization_result.get('successful_segments', 0),
+                    'summarizationResults': summarization_result.get('results', []),
+                    'completedAt': int(time.time() * 1000)
+                })
             else:
                 logger.error(f"Video summarization failed: {summarization_result.get('error', 'Unknown error')}")
+                update_job_status_record(job_id, upload_timestamp, 'failed', {
+                    'error': f"Video summarization failed: {summarization_result.get('error', 'Unknown error')}"
+                })
         else:
             logger.info("Step 5: Skipping video summarization (no segments to process)")
+            if segment_result.get('error'):
+                # Already updated in Step 4, don't update again
+                pass
+            else:
+                # No segments but no error - mark as done
+                update_job_status_record(job_id, upload_timestamp, 'done', {
+                    'processedSegments': 0,
+                    'completedAt': int(time.time() * 1000),
+                    'note': 'No segments to process'
+                })
         
         # TODO: 4. Trigger video analysis workflow
         # - Queue the video for Bedrock Nova Lite analysis
@@ -329,6 +402,15 @@ def process_video_upload(bucket_name: str, object_key: str, job_id: str,
         
     except Exception as e:
         logger.error(f"Error processing video upload {object_key}: {str(e)}")
+        
+        # Update job status to failed on any unhandled exception
+        try:
+            update_job_status_record(job_id, upload_timestamp, 'failed', {
+                'error': f"Unexpected error: {str(e)}"
+            })
+        except Exception as status_error:
+            logger.error(f"Failed to update job status after error: {status_error}")
+        
         return {
             'jobId': job_id,
             'filename': filename,
