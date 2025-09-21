@@ -216,9 +216,7 @@ const startAutoRefresh = () => {
 
 // Page metadata
 useHead({
-  title: 'Visionaree',
-  meta: [
-    { name: 'description', content: 'Upload and manage videos for annotation' },
-  ],
+  title: 'Lookowl',
+  meta: [{ name: 'description', content: 'Lookowl - Surveillance Simplified' }],
 })
 </script>

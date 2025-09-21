@@ -664,7 +664,7 @@ const formatDuration = (seconds: number): string => {
 // Page metadata
 useHead({
   title: computed(() =>
-    video.value ? `${video.value.title} - Video Details` : 'Video Details'
+    video.value ? `${video.value.title} - Lookowl` : 'Video Details'
   ),
   meta: [{ name: 'description', content: 'View and manage video details' }],
 })
