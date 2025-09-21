@@ -231,31 +231,6 @@
                     </Button>
                   </div>
                 </div>
-
-                <!-- Status indicator -->
-                <div class="absolute top-4 right-4">
-                  <div
-                    v-if="video.processingStatus === 'completed'"
-                    class="flex items-center gap-2 bg-green-500/80 text-white text-sm px-3 py-1 rounded-full"
-                  >
-                    <div class="w-2 h-2 bg-white rounded-full"></div>
-                    Ready
-                  </div>
-                  <div
-                    v-else-if="video.processingStatus === 'error'"
-                    class="flex items-center gap-2 bg-red-500/80 text-white text-sm px-3 py-1 rounded-full"
-                  >
-                    <div class="w-2 h-2 bg-white rounded-full"></div>
-                    Error
-                  </div>
-                  <div
-                    v-else-if="video.processingStatus === 'pending'"
-                    class="flex items-center gap-2 bg-yellow-500/80 text-white text-sm px-3 py-1 rounded-full"
-                  >
-                    <div class="w-2 h-2 bg-white rounded-full"></div>
-                    Pending
-                  </div>
-                </div>
               </div>
             </CardContent>
           </Card>
@@ -275,101 +250,64 @@
       </div>
 
       <!-- Video information -->
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <!-- Main info -->
-        <div class="lg:col-span-2">
-          <Card>
-            <CardHeader>
-              <CardTitle class="text-2xl">{{ video?.title }}</CardTitle>
-              <CardDescription class="text-base">
-                Video details and information
-              </CardDescription>
-            </CardHeader>
-            <CardContent class="space-y-4">
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label
-                    class="text-sm font-medium text-gray-500 dark:text-gray-400"
-                  >
-                    Filename
-                  </label>
-                  <p class="text-sm">{{ video?.filename }}</p>
-                </div>
-                <div>
-                  <label
-                    class="text-sm font-medium text-gray-500 dark:text-gray-400"
-                  >
-                    File Size
-                  </label>
-                  <p class="text-sm">
-                    {{ video?.size ? formatFileSize(video.size) : 'Unknown' }}
-                  </p>
-                </div>
-                <div>
-                  <label
-                    class="text-sm font-medium text-gray-500 dark:text-gray-400"
-                  >
-                    Duration
-                  </label>
-                  <p class="text-sm">
-                    {{
-                      video?.duration
-                        ? formatDuration(video.duration)
-                        : 'Unknown'
-                    }}
-                  </p>
-                </div>
-                <div>
-                  <label
-                    class="text-sm font-medium text-gray-500 dark:text-gray-400"
-                  >
-                    Uploaded
-                  </label>
-                  <p class="text-sm">
-                    {{
-                      video?.uploadedAt
-                        ? formatDate(video.uploadedAt)
-                        : 'Unknown'
-                    }}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        <!-- Actions sidebar -->
-        <div>
-          <Card>
-            <CardHeader>
-              <CardTitle class="text-lg">Actions</CardTitle>
-            </CardHeader>
-            <CardContent class="space-y-3">
-              <Button
-                v-if="video?.processingStatus === 'completed'"
-                class="w-full"
-                @click="startAnnotation"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  class="h-4 w-4 mr-2"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
+      <div>
+        <Card>
+          <CardHeader>
+            <CardTitle class="text-2xl">{{ video?.title }}</CardTitle>
+            <CardDescription class="text-base">
+              Video details and information
+            </CardDescription>
+          </CardHeader>
+          <CardContent class="space-y-6">
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div>
+                <label
+                  class="text-sm font-medium text-gray-500 dark:text-gray-400"
                 >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                  />
-                </svg>
-                Start Annotation
-              </Button>
+                  Filename
+                </label>
+                <p class="text-sm">{{ video?.filename }}</p>
+              </div>
+              <div>
+                <label
+                  class="text-sm font-medium text-gray-500 dark:text-gray-400"
+                >
+                  File Size
+                </label>
+                <p class="text-sm">
+                  {{ video?.size ? formatFileSize(video.size) : 'Unknown' }}
+                </p>
+              </div>
+              <div>
+                <label
+                  class="text-sm font-medium text-gray-500 dark:text-gray-400"
+                >
+                  Duration
+                </label>
+                <p class="text-sm">
+                  {{
+                    video?.duration ? formatDuration(video.duration) : 'Unknown'
+                  }}
+                </p>
+              </div>
+              <div>
+                <label
+                  class="text-sm font-medium text-gray-500 dark:text-gray-400"
+                >
+                  Uploaded
+                </label>
+                <p class="text-sm">
+                  {{
+                    video?.uploadedAt ? formatDate(video.uploadedAt) : 'Unknown'
+                  }}
+                </p>
+              </div>
+            </div>
 
+            <!-- Actions -->
+            <div class="flex gap-3 pt-4 border-t">
               <Button
                 variant="outline"
-                class="w-full"
                 @click="downloadVideo"
                 :disabled="video?.processingStatus !== 'completed'"
               >
@@ -390,7 +328,7 @@
                 Download
               </Button>
 
-              <Button variant="destructive" class="w-full" @click="deleteVideo">
+              <Button variant="destructive" @click="deleteVideo">
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
                   class="h-4 w-4 mr-2"
@@ -407,9 +345,9 @@
                 </svg>
                 Delete Video
               </Button>
-            </CardContent>
-          </Card>
-        </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   </div>
@@ -619,11 +557,6 @@ const onProgressChange = (value: number[] | undefined) => {
     currentTime.value = newTime
     progress.value = value
   }
-}
-
-const startAnnotation = () => {
-  // TODO: Navigate to annotation interface
-  toast('Annotation feature coming soon!')
 }
 
 const downloadVideo = () => {
