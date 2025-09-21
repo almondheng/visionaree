@@ -426,6 +426,9 @@ Return only the JSON response as specified in the system prompt, no extra text."
                         original_segment["relevance_reason"] = relevant_seg.get(
                             "relevance_reason", ""
                         )
+                        original_segment["threat_level"] = relevant_seg.get(
+                            "threat_level", ""
+                        )
                         filtered_segments.append(original_segment)
 
                 return {
