@@ -78,7 +78,6 @@
                   "
                   ref="videoPlayer"
                   class="w-full h-full object-contain"
-                  autoplay
                   @loadedmetadata="onVideoLoaded"
                   @timeupdate="onTimeUpdate"
                   @error="onVideoError"
@@ -434,31 +433,30 @@ watch(
 )
 
 // Watch for backend status changes to trigger auto-prompting
-watch(
-  backendStatus,
-  async (newStatus, oldStatus) => {
-    if (
-      newStatus === 'done' &&
-      oldStatus !== 'done' &&
-      !hasAutoPrompted.value &&
-      videoPromptRef.value
-    ) {
-      console.log('Backend is ready, triggering auto-prompt...')
-      hasAutoPrompted.value = true
-      
-      // Wait a bit for the VideoPrompt component to be fully mounted
-      await nextTick()
-      
-      try {
-        // Trigger the example prompt automatically
-        await videoPromptRef.value.submitSuggestedPrompt('Identify suspicious activities')
-        toast('Auto-analyzing video for suspicious activities...')
-      } catch (error) {
-        console.error('Failed to trigger auto-prompt:', error)
-      }
+watch(backendStatus, async (newStatus, oldStatus) => {
+  if (
+    newStatus === 'done' &&
+    oldStatus !== 'done' &&
+    !hasAutoPrompted.value &&
+    videoPromptRef.value
+  ) {
+    console.log('Backend is ready, triggering auto-prompt...')
+    hasAutoPrompted.value = true
+
+    // Wait a bit for the VideoPrompt component to be fully mounted
+    await nextTick()
+
+    try {
+      // Trigger the example prompt automatically
+      await videoPromptRef.value.submitSuggestedPrompt(
+        'Identify suspicious activities'
+      )
+      toast('Auto-analyzing video for suspicious activities...')
+    } catch (error) {
+      console.error('Failed to trigger auto-prompt:', error)
     }
   }
-)
+})
 
 onBeforeUnmount(() => {
   if (refreshInterval) {
