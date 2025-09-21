@@ -337,7 +337,6 @@ Return your response as a JSON with this exact structure:
     "relevant_segments": [
         {
             "segment_id": <number>,
-            "relevance_score": <number between 0 and 1>,
             "relevance_reason": "<brief explanation>",
             "threat_level": <"low", "medium", "high">
         }
