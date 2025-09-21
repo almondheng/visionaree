@@ -71,9 +71,11 @@
               <div
                 class="bg-gray-100 dark:bg-gray-800 relative overflow-hidden rounded-lg h-full"
               >
-                <!-- Video player for ready videos -->
+                <!-- Video player for completed videos -->
                 <video
-                  v-if="video.processingStatus === 'ready' && video.videoBlob"
+                  v-if="
+                    video.processingStatus === 'completed' && video.videoBlob
+                  "
                   ref="videoPlayer"
                   class="w-full h-full object-contain"
                   autoplay
@@ -91,7 +93,9 @@
 
                 <!-- Video progress overlay -->
                 <div
-                  v-if="video.processingStatus === 'ready' && video.videoBlob"
+                  v-if="
+                    video.processingStatus === 'completed' && video.videoBlob
+                  "
                   class="absolute bottom-0 left-0 right-0 p-2"
                 >
                   <!-- Minimal progress bar -->
@@ -182,10 +186,7 @@
 
                 <!-- Processing overlay -->
                 <div
-                  v-if="
-                    video.processingStatus === 'processing' ||
-                    video.processingStatus === 'backend-processing'
-                  "
+                  v-if="video.processingStatus === 'processing'"
                   class="absolute inset-0 bg-black/50 flex items-center justify-center"
                 >
                   <div class="text-white text-center">
@@ -194,11 +195,7 @@
                     ></div>
                     <p class="text-lg">Processing video...</p>
                     <p class="text-sm text-gray-300">
-                      {{
-                        video.processingStatus === 'backend-processing'
-                          ? 'Analyzing video content for AI questions...'
-                          : 'This may take a few minutes'
-                      }}
+                      This may take a few minutes
                     </p>
                   </div>
                 </div>
@@ -318,7 +315,7 @@
               <Button
                 variant="outline"
                 @click="downloadVideo"
-                :disabled="video?.processingStatus !== 'ready'"
+                :disabled="video?.processingStatus !== 'completed'"
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -378,8 +375,7 @@ import {
 import VideoPrompt from '~/components/VideoPrompt.vue'
 import VideoPromptSkeleton from '~/components/VideoPromptSkeleton.vue'
 import { Slider } from '~/components/ui/slider'
-import { videoProcessingService } from '~/lib/video-service'
-import { useVideoStatusPolling } from '~/composables/useVideoStatusPolling'
+import { videoProcessingService, checkVideoStatus } from '~/lib/video-service'
 import type { VideoRecord } from '~/lib/db'
 
 // Router
@@ -392,9 +388,11 @@ const isLoading = ref(true)
 const error = ref(false)
 const videoPlayer = ref<HTMLVideoElement>()
 
-// Use global video status polling
-const { isVideoProcessing } = useVideoStatusPolling()
-const isBackendReady = computed(() => video.value?.processingStatus === 'ready')
+// Backend processing status
+const backendStatus = ref<'done' | 'processing' | 'pending' | 'error'>(
+  'processing'
+)
+const isBackendReady = computed(() => backendStatus.value === 'done')
 
 // Video overlay state
 const currentTime = ref(0)
@@ -404,11 +402,13 @@ const progress = ref([0])
 
 // Auto-refresh for processing status
 let refreshInterval: ReturnType<typeof setInterval> | null = null
+let statusPollingInterval: ReturnType<typeof setInterval> | null = null
 
 // Lifecycle
 onMounted(async () => {
   await loadVideo()
   startAutoRefresh()
+  startStatusPolling()
 })
 
 // Watch for video changes and setup player
@@ -416,7 +416,7 @@ watch(
   [video, videoPlayer],
   async () => {
     if (
-      video.value?.processingStatus === 'ready' &&
+      video.value?.processingStatus === 'completed' &&
       video.value?.videoBlob &&
       videoPlayer.value
     ) {
@@ -431,6 +431,9 @@ watch(
 onBeforeUnmount(() => {
   if (refreshInterval) {
     clearInterval(refreshInterval)
+  }
+  if (statusPollingInterval) {
+    clearInterval(statusPollingInterval)
   }
   // Clean up video blob URL if exists
   if (videoPlayer.value?.src) {
@@ -454,8 +457,20 @@ const loadVideo = async () => {
 
     video.value = videoData
 
+    // Check initial backend status if video is uploaded
+    if (videoData.processingStatus === 'completed' && videoData.s3Uri) {
+      try {
+        const jobId = `upload-${videoId}`
+        const statusResponse = await checkVideoStatus(jobId)
+        backendStatus.value = statusResponse.status
+      } catch (statusError) {
+        console.error('Failed to check initial backend status:', statusError)
+        backendStatus.value = 'processing'
+      }
+    }
+
     // Set up video player if video is ready
-    if (videoData.processingStatus === 'ready' && videoData.videoBlob) {
+    if (videoData.processingStatus === 'completed' && videoData.videoBlob) {
       await nextTick()
       console.log('Video is completed, setting up player...')
       setupVideoPlayer()
@@ -514,6 +529,16 @@ const onTimeUpdate = useThrottleFn(() => {
   if (videoPlayer.value && videoPlayer.value.duration) {
     currentTime.value = videoPlayer.value.currentTime
     progress.value = [videoPlayer.value.currentTime]
+
+    const progressPercent =
+      (videoPlayer.value.currentTime / videoPlayer.value.duration) * 100
+    // Could emit progress for future annotation features
+    const currentTimeInSeconds = videoPlayer.value.currentTime
+    console.log(
+      `Video progress: ${progressPercent.toFixed(
+        1
+      )}% (${currentTimeInSeconds.toFixed()}s)`
+    )
   }
 }, 500)
 
@@ -623,8 +648,35 @@ const startAutoRefresh = () => {
   }, 5000)
 }
 
+const startStatusPolling = () => {
+  // Only poll if video is uploaded but backend not ready
+  if (
+    video.value?.processingStatus === 'completed' &&
+    video.value?.s3Uri &&
+    backendStatus.value !== 'done'
+  ) {
+    statusPollingInterval = setInterval(async () => {
+      if (video.value?.id && backendStatus.value !== 'done') {
+        try {
+          const jobId = `upload-${video.value.id}`
+          const statusResponse = await checkVideoStatus(jobId)
+          backendStatus.value = statusResponse.status
+
+          // Stop polling when done
+          if (statusResponse.status === 'done' && statusPollingInterval) {
+            clearInterval(statusPollingInterval)
+            statusPollingInterval = null
+          }
+        } catch (error) {
+          console.error('Failed to check backend status:', error)
+        }
+      }
+    }, 3000)
+  }
+}
+
 const seekToTimestamp = (timestamp: number) => {
-  if (videoPlayer.value && video.value?.processingStatus === 'ready') {
+  if (videoPlayer.value && video.value?.processingStatus === 'completed') {
     videoPlayer.value.currentTime = timestamp
     videoPlayer.value.play().catch(err => {
       console.error('Error playing video:', err)
