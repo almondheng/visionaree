@@ -167,7 +167,7 @@ export class BackendStack extends cdk.Stack {
         lambda.LayerVersion.fromLayerVersionArn(
           this,
           'FFmpegLayer',
-          'arn:aws:lambda:us-east-1:319237335445:layer:ffmpeg:1'
+          'arn:aws:lambda:us-east-1:113273159455:layer:ffmpeg:1'
         )
       ]
     });
