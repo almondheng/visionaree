@@ -15,6 +15,7 @@ export class BackendStack extends cdk.Stack {
   public readonly s3EventProcessor: lambda.Function;
   public readonly videoQueryHandler: lambda.Function;
   public readonly jobStatusHandler: lambda.Function;
+  public readonly videoInferenceHandler: lambda.Function;
   public readonly api: apigateway.RestApi;
   public readonly videoAnalysisTable: dynamodb.Table;
   public readonly jobStatusTable: dynamodb.Table;
@@ -199,6 +200,28 @@ export class BackendStack extends cdk.Stack {
       description: 'Return only the status field for a video processing job'
     });
 
+    // Create Lambda function for direct video inference
+    this.videoInferenceHandler = new lambda.Function(this, 'VideoInferenceHandler', {
+      runtime: lambda.Runtime.PYTHON_3_11,
+      code: lambda.Code.fromAsset(path.join(__dirname, '../../backend')),
+      handler: 'video_inference_handler.lambda_handler',
+      environment: {
+        SEGMENTS_BUCKET_NAME: this.segmentsBucket.bucketName
+      },
+      timeout: cdk.Duration.minutes(5), // Longer timeout for video processing and inference
+      memorySize: 1024, // More memory for video processing
+      ephemeralStorageSize: cdk.Size.gibibytes(2), // Temporary storage for video files
+      description: 'Handle direct video uploads and run immediate Bedrock inference without S3 storage',
+      layers: [
+        // FFmpeg Lambda layer for video processing
+        lambda.LayerVersion.fromLayerVersionArn(
+          this,
+          'VideoInferenceFFmpegLayer',
+          'arn:aws:lambda:us-east-1:113273159455:layer:ffmpeg:1'
+        )
+      ]
+    });
+
     // Grant Lambda function permissions to generate presigned URLs for the S3 bucket
     this.s3Bucket.grantPut(this.presignedUrlFunction);
     this.s3Bucket.grantRead(this.presignedUrlFunction);
@@ -219,7 +242,10 @@ export class BackendStack extends cdk.Stack {
     // Grant video query handler permissions to read from DynamoDB tables
     this.videoAnalysisTable.grantReadData(this.videoQueryHandler);
     this.jobStatusTable.grantReadData(this.videoQueryHandler);
-  this.jobStatusTable.grantReadData(this.jobStatusHandler);
+    this.jobStatusTable.grantReadData(this.jobStatusHandler);
+
+    // Grant video inference handler permissions to use segments bucket for temporary files
+    this.segmentsBucket.grantReadWrite(this.videoInferenceHandler);
 
     // Additional IAM permissions for presigned URL generation
     this.presignedUrlFunction.addToRolePolicy(
@@ -279,10 +305,26 @@ export class BackendStack extends cdk.Stack {
       })
     );
 
+    // Grant video inference handler permissions to invoke Bedrock models
+    this.videoInferenceHandler.addToRolePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          'bedrock:InvokeModel'
+        ],
+        resources: ["*"]
+      })
+    );
+
     // Create API Gateway
     this.api = new apigateway.RestApi(this, 'VisionareeApi', {
       restApiName: 'Visionaree Video Upload API',
       description: 'API for video upload and analysis',
+      binaryMediaTypes: [
+        'video/*',
+        'application/octet-stream',
+        'multipart/form-data'
+      ],
       defaultCorsPreflightOptions: {
         allowOrigins: apigateway.Cors.ALL_ORIGINS, // Configure for your domain in production
         allowMethods: apigateway.Cors.ALL_METHODS,
@@ -291,7 +333,8 @@ export class BackendStack extends cdk.Stack {
           'X-Amz-Date',
           'Authorization',
           'X-Api-Key',
-          'X-Amz-Security-Token'
+          'X-Amz-Security-Token',
+          'X-Filename'
         ]
       },
       deployOptions: {
@@ -418,6 +461,25 @@ export class BackendStack extends cdk.Stack {
       authorizationType: apigateway.AuthorizationType.NONE
     });
 
+    // Add direct video inference endpoint: /video/analyze-direct
+    const analyzeDirectResource = videoResource.addResource('analyze-direct');
+    
+    const videoInferenceIntegration = new apigateway.LambdaIntegration(
+      this.videoInferenceHandler,
+      {
+        requestTemplates: { 'application/json': '{ "statusCode": "200" }' },
+        // Enable binary media types for video uploads
+        contentHandling: apigateway.ContentHandling.CONVERT_TO_TEXT
+      }
+    );
+    
+    analyzeDirectResource.addMethod('POST', videoInferenceIntegration, {
+      authorizationType: apigateway.AuthorizationType.NONE,
+      requestParameters: {
+        'method.request.header.content-type': false
+      }
+    });
+
     // Configure S3 bucket to send upload events to the processor Lambda
     this.s3Bucket.addEventNotification(
       s3.EventType.OBJECT_CREATED,
@@ -519,6 +581,16 @@ export class BackendStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'JobStatusEndpoint', {
       value: `${this.api.url}video/{jobId}/status`,
       description: 'Job status polling endpoint that returns only the status field'
+    });
+
+    new cdk.CfnOutput(this, 'VideoInferenceEndpoint', {
+      value: `${this.api.url}video/analyze-direct`,
+      description: 'Direct video inference endpoint for immediate Bedrock analysis'
+    });
+
+    new cdk.CfnOutput(this, 'VideoInferenceHandlerName', {
+      value: this.videoInferenceHandler.functionName,
+      description: 'Name of the direct video inference Lambda function'
     });
   }
 }

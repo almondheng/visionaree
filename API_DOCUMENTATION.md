@@ -254,3 +254,270 @@ python main.py s3://visionaree-video-bucket/videos/analysis-job-001/original/sec
 - **Response**: `{"status": "healthy", "timestamp": "..."}`
 
 This endpoint can be used to verify that the API is running correctly.
+
+## Direct Video Inference Endpoint
+
+For immediate analysis of short video segments without storing them permanently.
+
+### Endpoint Details
+
+- **URL**: `https://{api-gateway-url}/prod/video/analyze-direct`
+- **Method**: `POST`
+- **Content-Type**: `multipart/form-data` or `video/*` or `application/octet-stream`
+
+### Request Format
+
+#### Option 1: Multipart Form Data
+```http
+POST /prod/video/analyze-direct
+Content-Type: multipart/form-data; boundary=----WebKitFormBoundary...
+
+------WebKitFormBoundary...
+Content-Disposition: form-data; name="video"; filename="clip.mp4"
+Content-Type: video/mp4
+
+[binary video data]
+------WebKitFormBoundary...--
+```
+
+#### Option 2: Direct Binary Upload
+```http
+POST /prod/video/analyze-direct
+Content-Type: video/mp4
+X-Filename: clip.mp4
+
+[binary video data]
+```
+
+### Requirements and Limitations
+
+- **File Size**: Maximum 50MB
+- **Duration**: Videos longer than 60 seconds will be truncated
+- **Format**: Any common video format (MP4, MOV, AVI, MKV, WebM)
+- **Resolution**: Videos larger than 1920x1080 will be downscaled
+- **Processing**: Videos are automatically re-encoded for Bedrock compatibility if needed
+
+### Response Format
+
+#### Success Response (200)
+```json
+{
+  "success": true,
+  "filename": "clip.mp4",
+  "video_info": {
+    "duration": 15.5,
+    "format": "mov,mp4,m4a,3gp,3g2,mj2",
+    "codec": "h264",
+    "width": 1280,
+    "height": 720,
+    "fps": 24.0,
+    "bitrate": 1500000
+  },
+  "reencoded": false,
+  "inference": {
+    "caption": "A person walks across a parking lot carrying a red backpack during daylight hours.",
+    "status": "success",
+    "error": null
+  },
+  "processing_notes": []
+}
+```
+
+#### Success with Re-encoding
+```json
+{
+  "success": true,
+  "filename": "large_video.mov",
+  "video_info": {
+    "duration": 45.2,
+    "format": "mov,mp4,m4a,3gp,3g2,mj2",
+    "codec": "prores",
+    "width": 3840,
+    "height": 2160,
+    "fps": 60.0,
+    "bitrate": 150000000
+  },
+  "reencoded": true,
+  "inference": {
+    "caption": "Security camera footage shows multiple vehicles in a busy intersection during rush hour.",
+    "status": "success",
+    "error": null
+  },
+  "processing_notes": [
+    "Video was re-encoded for better Bedrock compatibility"
+  ]
+}
+```
+
+#### Error Response (400/413/500)
+```json
+{
+  "success": false,
+  "error": "File too large. Maximum size is 50MB",
+  "statusCode": 413
+}
+```
+
+### Usage Examples
+
+#### 1. JavaScript with FormData (Recommended)
+```javascript
+async function analyzeVideoDirectly(videoFile) {
+  const formData = new FormData();
+  formData.append('video', videoFile);
+  
+  try {
+    const response = await fetch('https://your-api-gateway-url/prod/video/analyze-direct', {
+      method: 'POST',
+      body: formData
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    const result = await response.json();
+    
+    if (result.success) {
+      console.log('Video analysis result:', result.inference.caption);
+      console.log('Video info:', result.video_info);
+      if (result.reencoded) {
+        console.log('Video was re-encoded for compatibility');
+      }
+    } else {
+      console.error('Analysis failed:', result.error);
+    }
+    
+    return result;
+  } catch (error) {
+    console.error('Request failed:', error);
+    throw error;
+  }
+}
+
+// Usage with file input
+document.getElementById('videoInput').addEventListener('change', async (event) => {
+  const file = event.target.files[0];
+  if (file && file.type.startsWith('video/')) {
+    try {
+      const result = await analyzeVideoDirectly(file);
+      // Handle result
+    } catch (error) {
+      // Handle error
+    }
+  }
+});
+```
+
+#### 2. JavaScript with Direct Binary Upload
+```javascript
+async function analyzeVideoBinary(videoFile) {
+  try {
+    const response = await fetch('https://your-api-gateway-url/prod/video/analyze-direct', {
+      method: 'POST',
+      headers: {
+        'Content-Type': videoFile.type,
+        'X-Filename': videoFile.name
+      },
+      body: videoFile
+    });
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Analysis failed:', error);
+    throw error;
+  }
+}
+```
+
+#### 3. cURL Examples
+```bash
+# Using multipart form data
+curl -X POST https://your-api-gateway-url/prod/video/analyze-direct \
+  -H "Content-Type: multipart/form-data" \
+  -F "video=@path/to/video.mp4"
+
+# Using direct binary upload
+curl -X POST https://your-api-gateway-url/prod/video/analyze-direct \
+  -H "Content-Type: video/mp4" \
+  -H "X-Filename: video.mp4" \
+  --data-binary @path/to/video.mp4
+```
+
+#### 4. Python Example
+```python
+import requests
+
+def analyze_video_direct(video_path):
+    """Analyze video using direct inference endpoint"""
+    
+    with open(video_path, 'rb') as video_file:
+        files = {'video': video_file}
+        
+        response = requests.post(
+            'https://your-api-gateway-url/prod/video/analyze-direct',
+            files=files
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            if result['success']:
+                print(f"Analysis: {result['inference']['caption']}")
+                print(f"Video duration: {result['video_info']['duration']} seconds")
+                if result['reencoded']:
+                    print("Video was re-encoded for compatibility")
+                return result
+            else:
+                print(f"Analysis failed: {result['error']}")
+        else:
+            print(f"Request failed: {response.status_code}")
+    
+    return None
+
+# Usage
+result = analyze_video_direct("path/to/your/video.mp4")
+```
+
+### Automatic Video Processing
+
+The endpoint automatically optimizes videos for Bedrock compatibility:
+
+1. **Duration Limit**: Videos are truncated to 60 seconds maximum
+2. **Resolution Scaling**: Videos larger than 1920x1080 are downscaled while preserving aspect ratio
+3. **Codec Conversion**: Non-H.264 videos are converted to H.264
+4. **Bitrate Optimization**: High bitrate videos are compressed to ≤2 Mbps
+5. **Frame Rate Limiting**: Videos with >30fps are reduced to 24fps
+
+### Error Handling
+
+| Status Code | Error | Description |
+|-------------|-------|-------------|
+| 400 | Request body required | No video data in request |
+| 400 | Unsupported content type | Content-Type not supported |
+| 400 | No video data found | Could not extract video from request |
+| 413 | File too large | Video exceeds 50MB limit |
+| 500 | Processing error | Video processing or Bedrock inference failed |
+
+### Performance Notes
+
+- **Processing Time**: Typically 5-30 seconds depending on video size and re-encoding needs
+- **Memory Usage**: Up to 1GB for large video processing
+- **Concurrent Requests**: Limited by Lambda concurrency (can be adjusted)
+- **Temporary Storage**: Videos are temporarily stored in S3 for Bedrock processing, then immediately deleted
+
+### Security Considerations
+
+- Videos are not permanently stored - they're deleted immediately after processing
+- Temporary S3 objects are automatically cleaned up
+- All processing happens in isolated Lambda environment
+- API supports CORS for web applications
+
+### Integration with Main Workflow
+
+This endpoint is independent of the main video upload workflow (`/presigned-url` → S3 → Lambda processing). Use this for:
+- Quick analysis of short clips
+- Real-time video understanding
+- Testing and development
+- Mobile app integrations
+
+For longer videos or when you need to store results permanently, use the main workflow instead.
