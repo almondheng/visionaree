@@ -66,173 +66,14 @@
       <div class="grid grid-cols-1 xl:grid-cols-3 gap-8">
         <!-- Video player section -->
         <div class="xl:col-span-2 h-full max-h-[500px]">
-          <Card class="py-0 h-full">
-            <CardContent class="p-0 h-full">
-              <div
-                class="bg-gray-100 dark:bg-gray-800 relative overflow-hidden rounded-lg h-full"
-              >
-                <!-- Video player for completed videos -->
-                <video
-                  v-if="
-                    video.processingStatus === 'completed' && video.videoBlob
-                  "
-                  ref="videoPlayer"
-                  class="w-full h-full object-contain"
-                  @loadedmetadata="onVideoLoaded"
-                  @timeupdate="onTimeUpdate"
-                  @error="onVideoError"
-                  @loadstart="onLoadStart"
-                  @canplay="onCanPlay"
-                  @play="onPlay"
-                  @pause="onPause"
-                  @click="togglePlayPause"
-                >
-                  Your browser does not support the video tag.
-                </video>
-
-                <!-- Video progress overlay -->
-                <div
-                  v-if="
-                    video.processingStatus === 'completed' && video.videoBlob
-                  "
-                  class="absolute bottom-0 left-0 right-0 p-2"
-                >
-                  <!-- Minimal progress bar -->
-                  <div class="bg-black/30 backdrop-blur-sm rounded px-3 py-1.5">
-                    <!-- Progress slider -->
-                    <div class="flex items-center gap-2">
-                      <!-- Play/Pause button -->
-                      <button
-                        @click="togglePlayPause"
-                        class="flex items-center justify-center w-6 h-6 bg-white/20 hover:bg-white/30 rounded transition-all duration-200 text-white flex-shrink-0"
-                      >
-                        <!-- Play icon -->
-                        <svg
-                          v-if="!isPlaying"
-                          xmlns="http://www.w3.org/2000/svg"
-                          class="h-3 w-3"
-                          fill="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path d="M8 5v14l11-7z" />
-                        </svg>
-                        <!-- Pause icon -->
-                        <svg
-                          v-else
-                          xmlns="http://www.w3.org/2000/svg"
-                          class="h-3 w-3"
-                          fill="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
-                        </svg>
-                      </button>
-
-                      <!-- Time display -->
-                      <span
-                        class="text-white text-xs font-medium whitespace-nowrap"
-                      >
-                        {{ formatDuration(currentTime) }}
-                      </span>
-
-                      <!-- Progress slider -->
-                      <Slider
-                        :model-value="progress"
-                        :max="duration"
-                        :step="1"
-                        class="flex-1 cursor-pointer"
-                        @update:model-value="onProgressChange"
-                      />
-
-                      <!-- Duration -->
-                      <span
-                        class="text-white text-xs font-medium whitespace-nowrap"
-                      >
-                        {{ formatDuration(duration) }}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Thumbnail for non-completed videos -->
-                <div
-                  v-else
-                  class="w-full h-full flex items-center justify-center min-h-[400px]"
-                >
-                  <img
-                    v-if="video.thumbnail"
-                    :src="video.thumbnail"
-                    :alt="video.title"
-                    class="w-full h-full object-cover"
-                  />
-                  <div v-else class="text-gray-400">
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      class="h-24 w-24"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
-                      />
-                    </svg>
-                  </div>
-                </div>
-
-                <!-- Processing overlay -->
-                <div
-                  v-if="video.processingStatus === 'processing'"
-                  class="absolute inset-0 bg-black/50 flex items-center justify-center"
-                >
-                  <div class="text-white text-center">
-                    <div
-                      class="animate-spin rounded-full h-8 w-8 border-b-2 border-white mb-4 mx-auto"
-                    ></div>
-                    <p class="text-lg">Processing video...</p>
-                    <p class="text-sm text-gray-300">
-                      This may take a few minutes
-                    </p>
-                  </div>
-                </div>
-
-                <!-- Error overlay -->
-                <div
-                  v-if="video.processingStatus === 'error'"
-                  class="absolute inset-0 bg-red-500/20 flex items-center justify-center"
-                >
-                  <div class="text-white text-center">
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      class="h-8 w-8 mx-auto mb-4"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                      />
-                    </svg>
-                    <p class="text-lg">Processing failed</p>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      class="mt-2 bg-white/10 border-white/20 text-white hover:bg-white/20"
-                      @click="retryProcessing"
-                    >
-                      Retry
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          <VideoPlayer
+            ref="videoPlayerRef"
+            :video-blob="video.videoBlob"
+            :processing-status="video.processingStatus"
+            :thumbnail="video.thumbnail"
+            :title="video.title"
+            @retry="retryProcessing"
+          />
         </div>
 
         <!-- Video prompt section -->
@@ -362,7 +203,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, nextTick, watch, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useThrottleFn } from '@vueuse/core'
 import { toast } from 'vue-sonner'
 import { Button } from '~/components/ui/button'
 import {
@@ -374,7 +214,7 @@ import {
 } from '~/components/ui/card'
 import VideoPrompt from '~/components/VideoPrompt.vue'
 import VideoPromptSkeleton from '~/components/VideoPromptSkeleton.vue'
-import { Slider } from '~/components/ui/slider'
+import VideoPlayer from '~/components/VideoPlayer.vue'
 import { videoProcessingService, checkVideoStatus } from '~/lib/video-service'
 import type { VideoRecord } from '~/lib/db'
 
@@ -386,19 +226,13 @@ const router = useRouter()
 const video = ref<VideoRecord | null>(null)
 const isLoading = ref(true)
 const error = ref(false)
-const videoPlayer = ref<HTMLVideoElement>()
+const videoPlayerRef = ref<InstanceType<typeof VideoPlayer> | null>(null)
 
 // Backend processing status
 const backendStatus = ref<'done' | 'processing' | 'pending' | 'error'>(
   'processing'
 )
 const isBackendReady = computed(() => backendStatus.value === 'done')
-
-// Video overlay state
-const currentTime = ref(0)
-const duration = ref(0)
-const isPlaying = ref(false)
-const progress = ref([0])
 
 // Auto-refresh for processing status
 let refreshInterval: ReturnType<typeof setInterval> | null = null
@@ -415,22 +249,7 @@ onMounted(async () => {
   startStatusPolling()
 })
 
-// Watch for video changes and setup player
-watch(
-  [video, videoPlayer],
-  async () => {
-    if (
-      video.value?.processingStatus === 'completed' &&
-      video.value?.videoBlob &&
-      videoPlayer.value
-    ) {
-      await nextTick()
-      console.log('Watcher triggered - setting up video player')
-      setupVideoPlayer()
-    }
-  },
-  { immediate: false }
-)
+
 
 // Watch for backend status changes to trigger auto-prompting
 watch(backendStatus, async (newStatus, oldStatus) => {
@@ -465,10 +284,6 @@ onBeforeUnmount(() => {
   if (statusPollingInterval) {
     clearInterval(statusPollingInterval)
   }
-  // Clean up video blob URL if exists
-  if (videoPlayer.value?.src) {
-    URL.revokeObjectURL(videoPlayer.value.src)
-  }
 })
 
 // Methods
@@ -499,18 +314,6 @@ const loadVideo = async () => {
         backendStatus.value = 'processing'
       }
     }
-
-    // Set up video player if video is ready
-    if (videoData.processingStatus === 'completed' && videoData.videoBlob) {
-      await nextTick()
-      console.log('Video is completed, setting up player...')
-      setupVideoPlayer()
-    } else {
-      console.log('Video not ready for playback:', {
-        status: videoData.processingStatus,
-        hasBlob: !!videoData.videoBlob,
-      })
-    }
   } catch (err) {
     console.error('Error loading video:', err)
     error.value = true
@@ -519,106 +322,7 @@ const loadVideo = async () => {
   }
 }
 
-const setupVideoPlayer = () => {
-  if (!video.value?.videoBlob || !videoPlayer.value) {
-    console.log('Cannot setup video player:', {
-      hasBlob: !!video.value?.videoBlob,
-      hasPlayerRef: !!videoPlayer.value,
-    })
-    return
-  }
 
-  // Clean up existing URL if any
-  if (videoPlayer.value.src) {
-    URL.revokeObjectURL(videoPlayer.value.src)
-  }
-
-  // Create object URL for the video blob
-  const videoUrl = URL.createObjectURL(video.value.videoBlob)
-  console.log('Setting video URL:', videoUrl)
-  videoPlayer.value.src = videoUrl
-
-  // Force load the video
-  videoPlayer.value.load()
-}
-
-const onVideoLoaded = () => {
-  console.log('Video loaded successfully', {
-    duration: videoPlayer.value?.duration,
-    videoWidth: videoPlayer.value?.videoWidth,
-    videoHeight: videoPlayer.value?.videoHeight,
-    readyState: videoPlayer.value?.readyState,
-  })
-
-  // Update duration for overlay
-  if (videoPlayer.value?.duration) {
-    duration.value = videoPlayer.value.duration
-  }
-}
-
-const onTimeUpdate = useThrottleFn(() => {
-  if (videoPlayer.value && videoPlayer.value.duration) {
-    currentTime.value = videoPlayer.value.currentTime
-    progress.value = [videoPlayer.value.currentTime]
-
-    const progressPercent =
-      (videoPlayer.value.currentTime / videoPlayer.value.duration) * 100
-    // Could emit progress for future annotation features
-    const currentTimeInSeconds = videoPlayer.value.currentTime
-    console.log(
-      `Video progress: ${progressPercent.toFixed(
-        1
-      )}% (${currentTimeInSeconds.toFixed()}s)`
-    )
-  }
-}, 500)
-
-const onVideoError = (event: Event) => {
-  console.error('Video error:', event, {
-    error: videoPlayer.value?.error,
-    networkState: videoPlayer.value?.networkState,
-    readyState: videoPlayer.value?.readyState,
-  })
-  toast('Error loading video')
-}
-
-const onLoadStart = () => {
-  console.log('Video load started')
-}
-
-const onCanPlay = () => {
-  console.log('Video can start playing')
-}
-
-// Video overlay and control methods
-const onPlay = () => {
-  isPlaying.value = true
-}
-
-const onPause = () => {
-  isPlaying.value = false
-}
-
-const togglePlayPause = () => {
-  if (!videoPlayer.value) return
-
-  if (videoPlayer.value.paused) {
-    videoPlayer.value.play()
-  } else {
-    videoPlayer.value.pause()
-  }
-}
-
-const onProgressChange = (value: number[] | undefined) => {
-  if (!videoPlayer.value || !value?.length) return
-
-  const newTime = value[0]
-  if (typeof newTime === 'number') {
-    videoPlayer.value.currentTime = newTime
-    currentTime.value = newTime
-    progress.value = value
-  }
-}
 
 const downloadVideo = () => {
   if (!video.value?.videoBlob) return
@@ -707,14 +411,7 @@ const startStatusPolling = () => {
 }
 
 const seekToTimestamp = (timestamp: number) => {
-  if (videoPlayer.value && video.value?.processingStatus === 'completed') {
-    videoPlayer.value.currentTime = timestamp
-    videoPlayer.value.play().catch(err => {
-      console.error('Error playing video:', err)
-    })
-  } else {
-    toast('Video is not ready for playback')
-  }
+  videoPlayerRef.value?.seekTo(timestamp)
 }
 
 // Utility functions
