@@ -204,8 +204,7 @@ def process_video_for_inference(video_data: bytes, filename: str) -> Dict[str, A
         if not temp_s3_uri:
             return {
                 'success': False,
-                'error': 'Failed to upload video for Bedrock processing',
-                'video_info': video_info
+                'error': 'Failed to upload video for Bedrock processing'
             }
         
         try:
@@ -219,21 +218,21 @@ def process_video_for_inference(video_data: bytes, filename: str) -> Dict[str, A
             )
             
             # Clean up temporary S3 object
-            cleanup_temp_s3_object(temp_s3_uri)
+            # disable cleanup for faster response
+            # cleanup_temp_s3_object(temp_s3_uri)
             
-            # Prepare response
+            # Prepare clean response with only essential data
             response = {
                 'success': True,
                 'filename': filename,
-                'video_info': video_info,
-                'reencoded': False,  # No re-encoding performed
-                'inference': {
-                    'caption': inference_result.get('caption'),
-                    'status': inference_result.get('status'),
-                    'error': inference_result.get('error')
-                },
-                'processing_notes': ["Using original video format (no re-encoding)"]
+                'file_size': video_info.get('file_size', 0),
+                'caption': inference_result.get('caption'),
+                'status': inference_result.get('status')
             }
+            
+            # Only include error if there was one
+            if inference_result.get('error'):
+                response['error'] = inference_result.get('error')
             
             return response
             
@@ -246,8 +245,7 @@ def process_video_for_inference(video_data: bytes, filename: str) -> Dict[str, A
         logger.error(f"Error processing video for inference: {str(e)}")
         return {
             'success': False,
-            'error': str(e),
-            'filename': filename
+            'error': str(e)
         }
         
     finally:

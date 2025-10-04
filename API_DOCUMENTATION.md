@@ -302,20 +302,9 @@ X-Filename: clip.mp4
 {
   "success": true,
   "filename": "clip.mp4",
-  "video_info": {
-    "file_size": 2048576,
-    "format": "video",
-    "note": "Using original format (no detailed analysis for speed)"
-  },
-  "reencoded": false,
-  "inference": {
-    "caption": "A person walks across a parking lot carrying a red backpack during daylight hours.",
-    "status": "success",
-    "error": null
-  },
-  "processing_notes": [
-    "Using original video format (no re-encoding)"
-  ]
+  "file_size": 2048576,
+  "caption": "A person walks across a parking lot carrying a red backpack during daylight hours.",
+  "status": "success"
 }
 ```
 
@@ -325,8 +314,7 @@ X-Filename: clip.mp4
 ```json
 {
   "success": false,
-  "error": "File too large. Maximum size is 50MB",
-  "statusCode": 413
+  "error": "File too large. Maximum size is 50MB"
 }
 ```
 
@@ -351,8 +339,12 @@ async function analyzeVideoDirectly(videoFile) {
     const result = await response.json();
     
     if (result.success) {
-      console.log('Video analysis result:', result.inference.caption);
-      console.log('Video info:', result.video_info);
+          if (result.success) {
+      console.log('Video analysis result:', result.caption);
+      console.log('File size:', result.file_size, 'bytes');
+    } else {
+      console.error('Analysis failed:', result.error);
+    }
       if (result.reencoded) {
         console.log('Video was re-encoded for compatibility');
       }
@@ -434,10 +426,8 @@ def analyze_video_direct(video_path):
         if response.status_code == 200:
             result = response.json()
             if result['success']:
-                print(f"Analysis: {result['inference']['caption']}")
-                print(f"Video duration: {result['video_info']['duration']} seconds")
-                if result['reencoded']:
-                    print("Video was re-encoded for compatibility")
+                print(f"Analysis: {result['caption']}")
+                print(f"File size: {result['file_size']} bytes")
                 return result
             else:
                 print(f"Analysis failed: {result['error']}")
