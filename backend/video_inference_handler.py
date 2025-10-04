@@ -190,28 +190,14 @@ def process_video_for_inference(video_data: bytes, filename: str) -> Dict[str, A
         
         logger.info(f"Saved video to temporary file: {input_path}")
         
-        # Check if video needs re-encoding for better Bedrock compatibility
-        video_info = get_video_info(input_path)
+        # Get basic video info for response (optional, for debugging)
+        video_info = get_simple_video_info(input_path)
         
-        # Determine if we need to re-encode
-        needs_reencoding = should_reencode_video(video_info)
+        # Use original video directly - assume it's already in correct format
+        inference_path = input_path
+        logger.info("Using original video format directly (no re-encoding)")
         
-        if needs_reencoding:
-            logger.info("Re-encoding video for better Bedrock compatibility")
-            processed_path = os.path.join(temp_dir, "processed_video.mp4")
-            reencode_result = reencode_video_for_bedrock(input_path, processed_path)
-            
-            if reencode_result['success']:
-                inference_path = processed_path
-                logger.info("Video re-encoding completed successfully")
-            else:
-                logger.warning(f"Video re-encoding failed: {reencode_result['error']}, using original")
-                inference_path = input_path
-        else:
-            logger.info("Video format is compatible, using original")
-            inference_path = input_path
-        
-        # Upload processed video to a temporary S3 location for Bedrock
+        # Upload video to a temporary S3 location for Bedrock
         # We need S3 URI for Bedrock, so create a temporary upload
         temp_s3_uri = upload_temp_video_to_s3(inference_path)
         
@@ -240,17 +226,14 @@ def process_video_for_inference(video_data: bytes, filename: str) -> Dict[str, A
                 'success': True,
                 'filename': filename,
                 'video_info': video_info,
-                'reencoded': needs_reencoding,
+                'reencoded': False,  # No re-encoding performed
                 'inference': {
                     'caption': inference_result.get('caption'),
                     'status': inference_result.get('status'),
                     'error': inference_result.get('error')
                 },
-                'processing_notes': []
+                'processing_notes': ["Using original video format (no re-encoding)"]
             }
-            
-            if needs_reencoding:
-                response['processing_notes'].append("Video was re-encoded for better Bedrock compatibility")
             
             return response
             
@@ -276,6 +259,34 @@ def process_video_for_inference(video_data: bytes, filename: str) -> Dict[str, A
                 logger.info("Cleaned up temporary directory")
             except Exception as e:
                 logger.warning(f"Failed to clean up temp directory: {str(e)}")
+
+
+def get_simple_video_info(video_path: str) -> Dict[str, Any]:
+    """
+    Get basic video information without detailed analysis.
+    
+    Args:
+        video_path: Path to video file
+        
+    Returns:
+        Dict containing basic video info
+    """
+    try:
+        file_size = os.path.getsize(video_path)
+        logger.info(f"Video file size: {file_size} bytes")
+        
+        return {
+            'file_size': file_size,
+            'format': 'video',
+            'note': 'Using original format (no detailed analysis for speed)'
+        }
+    except Exception as e:
+        logger.error(f"Error getting video info: {str(e)}")
+        return {
+            'file_size': 0,
+            'format': 'unknown',
+            'error': str(e)
+        }
 
 
 def get_video_info(video_path: str) -> Dict[str, Any]:
@@ -386,143 +397,6 @@ def parse_basic_video_info(ffmpeg_output: str) -> Dict[str, Any]:
     
     return info
 
-
-def should_reencode_video(video_info: Dict[str, Any]) -> bool:
-    """
-    Determine if video should be re-encoded for better Bedrock compatibility.
-    
-    Args:
-        video_info: Video information dict
-        
-    Returns:
-        Boolean indicating if re-encoding is recommended
-    """
-    
-    # Re-encode if:
-    # 1. Video duration is too long (>60 seconds)
-    # 2. Resolution is too high (>1080p)  
-    # 3. Codec is not H.264
-    # 4. Frame rate is too high (>30fps)
-    # 5. Bitrate is too high
-    
-    reasons = []
-    
-    duration = video_info.get('duration', 0)
-    if duration > 60:
-        reasons.append(f"duration too long ({duration:.1f}s > 60s)")
-    
-    width = video_info.get('width', 0)
-    height = video_info.get('height', 0)
-    if width > 1920 or height > 1080:
-        reasons.append(f"resolution too high ({width}x{height} > 1920x1080)")
-    
-    codec = video_info.get('codec', '').lower()
-    if codec not in ['h264', 'avc1']:
-        reasons.append(f"codec not H.264 ({codec})")
-    
-    fps = video_info.get('fps', 0)
-    if fps > 30:
-        reasons.append(f"frame rate too high ({fps} > 30fps)")
-    
-    bitrate = video_info.get('bitrate', 0)
-    if bitrate > 5_000_000:  # 5 Mbps
-        reasons.append(f"bitrate too high ({bitrate} > 5Mbps)")
-    
-    should_reencode = bool(reasons)
-    
-    if should_reencode:
-        logger.info(f"Video should be re-encoded. Reasons: {', '.join(reasons)}")
-    else:
-        logger.info("Video format is compatible with Bedrock")
-    
-    return should_reencode
-
-
-def reencode_video_for_bedrock(input_path: str, output_path: str) -> Dict[str, Any]:
-    """
-    Re-encode video for optimal Bedrock compatibility.
-    
-    Args:
-        input_path: Path to input video
-        output_path: Path for output video
-        
-    Returns:
-        Dict containing re-encoding results
-    """
-    try:
-        logger.info("Starting video re-encoding for Bedrock compatibility")
-        
-        # FFmpeg command for Bedrock-optimized encoding
-        cmd = [
-            FFMPEG_PATH,
-            '-i', input_path,
-            '-c:v', 'libx264',          # Use H.264 codec
-            '-preset', 'fast',           # Fast encoding preset
-            '-crf', '23',               # Good quality/size balance
-            '-maxrate', '2M',           # Limit bitrate to 2 Mbps
-            '-bufsize', '4M',           # Buffer size
-            '-vf', 'scale=\'min(1920,iw)\':\'min(1080,ih)\':force_original_aspect_ratio=decrease', # Limit to 1080p
-            '-r', '24',                 # Limit to 24 fps
-            '-t', '60',                 # Limit to 60 seconds
-            '-c:a', 'aac',              # AAC audio codec
-            '-ac', '2',                 # Stereo audio
-            '-b:a', '128k',             # 128k audio bitrate
-            '-movflags', '+faststart',   # Enable fast start for MP4
-            '-f', 'mp4',                # Output format
-            '-y',                       # Overwrite output file
-            output_path
-        ]
-        
-        logger.info(f"Running FFmpeg command: {' '.join(cmd)}")
-        
-        result = subprocess.run(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=120  # 2 minute timeout for re-encoding
-        )
-        
-        if result.returncode == 0:
-            # Check if output file was created and has reasonable size
-            if os.path.exists(output_path) and os.path.getsize(output_path) > 1000:  # At least 1KB
-                output_size = os.path.getsize(output_path)
-                input_size = os.path.getsize(input_path)
-                
-                logger.info(f"Re-encoding successful. Input: {input_size} bytes, Output: {output_size} bytes")
-                
-                return {
-                    'success': True,
-                    'input_size': input_size,
-                    'output_size': output_size,
-                    'compression_ratio': input_size / output_size if output_size > 0 else 0
-                }
-            else:
-                return {
-                    'success': False,
-                    'error': 'Output file was not created or is too small'
-                }
-        else:
-            logger.error(f"FFmpeg re-encoding failed with return code {result.returncode}")
-            logger.error(f"FFmpeg stderr: {result.stderr}")
-            return {
-                'success': False,
-                'error': f'FFmpeg failed: {result.stderr}',
-                'return_code': result.returncode
-            }
-        
-    except subprocess.TimeoutExpired:
-        logger.error("Video re-encoding timeout")
-        return {
-            'success': False,
-            'error': 'Re-encoding timeout (>2 minutes)'
-        }
-    except Exception as e:
-        logger.error(f"Error during video re-encoding: {str(e)}")
-        return {
-            'success': False,
-            'error': str(e)
-        }
 
 
 def upload_temp_video_to_s3(video_path: str) -> Optional[str]:

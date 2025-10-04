@@ -292,10 +292,8 @@ X-Filename: clip.mp4
 ### Requirements and Limitations
 
 - **File Size**: Maximum 50MB
-- **Duration**: Videos longer than 60 seconds will be truncated
-- **Format**: Any common video format (MP4, MOV, AVI, MKV, WebM)
-- **Resolution**: Videos larger than 1920x1080 will be downscaled
-- **Processing**: Videos are automatically re-encoded for Bedrock compatibility if needed
+- **Format**: Should be in Bedrock-compatible format (MP4 with H.264 recommended)
+- **Processing**: Videos are used directly without re-encoding for faster response times
 
 ### Response Format
 
@@ -305,13 +303,9 @@ X-Filename: clip.mp4
   "success": true,
   "filename": "clip.mp4",
   "video_info": {
-    "duration": 15.5,
-    "format": "mov,mp4,m4a,3gp,3g2,mj2",
-    "codec": "h264",
-    "width": 1280,
-    "height": 720,
-    "fps": 24.0,
-    "bitrate": 1500000
+    "file_size": 2048576,
+    "format": "video",
+    "note": "Using original format (no detailed analysis for speed)"
   },
   "reencoded": false,
   "inference": {
@@ -319,35 +313,13 @@ X-Filename: clip.mp4
     "status": "success",
     "error": null
   },
-  "processing_notes": []
-}
-```
-
-#### Success with Re-encoding
-```json
-{
-  "success": true,
-  "filename": "large_video.mov",
-  "video_info": {
-    "duration": 45.2,
-    "format": "mov,mp4,m4a,3gp,3g2,mj2",
-    "codec": "prores",
-    "width": 3840,
-    "height": 2160,
-    "fps": 60.0,
-    "bitrate": 150000000
-  },
-  "reencoded": true,
-  "inference": {
-    "caption": "Security camera footage shows multiple vehicles in a busy intersection during rush hour.",
-    "status": "success",
-    "error": null
-  },
   "processing_notes": [
-    "Video was re-encoded for better Bedrock compatibility"
+    "Using original video format (no re-encoding)"
   ]
 }
 ```
+
+
 
 #### Error Response (400/413/500)
 ```json
@@ -478,15 +450,13 @@ def analyze_video_direct(video_path):
 result = analyze_video_direct("path/to/your/video.mp4")
 ```
 
-### Automatic Video Processing
+### Video Processing
 
-The endpoint automatically optimizes videos for Bedrock compatibility:
+The endpoint processes videos for immediate Bedrock analysis:
 
-1. **Duration Limit**: Videos are truncated to 60 seconds maximum
-2. **Resolution Scaling**: Videos larger than 1920x1080 are downscaled while preserving aspect ratio
-3. **Codec Conversion**: Non-H.264 videos are converted to H.264
-4. **Bitrate Optimization**: High bitrate videos are compressed to ≤2 Mbps
-5. **Frame Rate Limiting**: Videos with >30fps are reduced to 24fps
+1. **Direct Processing**: Videos are used in their original format for faster response
+2. **Format Assumption**: Assumes videos are already in Bedrock-compatible format
+3. **No Re-encoding**: Optimized for speed by skipping video conversion steps
 
 ### Error Handling
 
@@ -500,8 +470,8 @@ The endpoint automatically optimizes videos for Bedrock compatibility:
 
 ### Performance Notes
 
-- **Processing Time**: Typically 5-30 seconds depending on video size and re-encoding needs
-- **Memory Usage**: Up to 1GB for large video processing
+- **Processing Time**: Typically 5-15 seconds (no re-encoding for faster response)
+- **Memory Usage**: Up to 1GB for video processing
 - **Concurrent Requests**: Limited by Lambda concurrency (can be adjusted)
 - **Temporary Storage**: Videos are temporarily stored in S3 for Bedrock processing, then immediately deleted
 
