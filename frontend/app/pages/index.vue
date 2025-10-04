@@ -22,20 +22,10 @@
 
     <!-- Upload section - shown when no videos or user wants to add more -->
     <div v-else-if="videos.length === 0" class="mb-8">
-      <VideoUpload
-        :on-upload-success="handleUploadSuccess"
-        :on-upload-error="handleUploadError"
-      />
-    </div>
-
-    <!-- Videos grid -->
-    <div v-else-if="videos.length > 0">
-      <div class="flex justify-between items-center mb-6">
-        <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100">
-          Your Videos ({{ videos.length }})
-        </h2>
+      <div class="flex justify-end mb-4">
         <Button
-          @click="showUploadDialog = true"
+          variant="outline"
+          @click="$router.push('/camera')"
           class="flex items-center gap-2"
         >
           <svg
@@ -49,11 +39,67 @@
               stroke-linecap="round"
               stroke-linejoin="round"
               stroke-width="2"
-              d="M12 4v16m8-8H4"
+              d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
             />
           </svg>
-          Add Video
+          Live Camera
         </Button>
+      </div>
+      <VideoUpload
+        :on-upload-success="handleUploadSuccess"
+        :on-upload-error="handleUploadError"
+      />
+    </div>
+
+    <!-- Videos grid -->
+    <div v-else-if="videos.length > 0">
+      <div class="flex justify-between items-center mb-6">
+        <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100">
+          Your Videos ({{ videos.length }})
+        </h2>
+        <div class="flex gap-2">
+          <Button
+            variant="outline"
+            @click="$router.push('/camera')"
+            class="flex items-center gap-2"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              class="h-4 w-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
+              />
+            </svg>
+            Live Camera
+          </Button>
+          <Button
+            @click="showUploadDialog = true"
+            class="flex items-center gap-2"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              class="h-4 w-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M12 4v16m8-8H4"
+              />
+            </svg>
+            Add Video
+          </Button>
+        </div>
       </div>
 
       <VideoGrid

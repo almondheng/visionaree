@@ -3,10 +3,15 @@
     <CardContent class="p-0 h-full">
       <div class="bg-black relative overflow-hidden rounded-lg h-full">
         <video
-          v-if="processingStatus === 'completed' && videoBlob"
+          v-if="
+            (processingStatus === 'completed' && videoBlob) ||
+            (isWebcam && webcamStream)
+          "
           ref="videoPlayer"
           class="w-full h-full object-contain"
-          muted
+          :muted="true"
+          :autoplay="isWebcam"
+          :playsinline="isWebcam"
           @loadedmetadata="onVideoLoaded"
           @timeupdate="onTimeUpdate"
           @error="onVideoError"
@@ -20,7 +25,7 @@
         </video>
 
         <div
-          v-if="processingStatus === 'completed' && videoBlob"
+          v-if="processingStatus === 'completed' && videoBlob && !isWebcam"
           class="absolute bottom-0 left-0 right-0 p-2"
         >
           <div class="bg-black/30 backdrop-blur-sm rounded px-3 py-1.5">
@@ -75,10 +80,10 @@
             :alt="title"
             class="w-full h-full object-cover"
           />
-          <div v-else class="text-gray-400">
+          <div v-else class="text-gray-400 text-center">
             <svg
               xmlns="http://www.w3.org/2000/svg"
-              class="h-24 w-24"
+              class="h-24 w-24 mx-auto mb-4"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
@@ -90,6 +95,10 @@
                 d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
               />
             </svg>
+            <p v-if="isWebcam" class="text-lg mb-2">Camera not active</p>
+            <p v-if="isWebcam" class="text-sm text-gray-500">
+              Click Start Camera to begin
+            </p>
           </div>
         </div>
 
@@ -125,8 +134,11 @@
                 d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
               />
             </svg>
-            <p class="text-lg">Processing failed</p>
+            <p class="text-lg">
+              {{ isWebcam && webcamError ? webcamError : 'Processing failed' }}
+            </p>
             <Button
+              v-if="!isWebcam"
               variant="outline"
               size="sm"
               class="mt-2 bg-white/10 border-white/20 text-white hover:bg-white/20"
@@ -154,6 +166,9 @@ const props = defineProps<{
   processingStatus: 'pending' | 'processing' | 'completed' | 'error'
   thumbnail?: string
   title?: string
+  isWebcam?: boolean
+  webcamStream?: MediaStream | null
+  webcamError?: string
 }>()
 
 const emit = defineEmits<{
@@ -167,9 +182,12 @@ const isPlaying = ref(false)
 const progress = ref([0])
 
 watch(
-  [() => props.videoBlob, videoPlayer],
+  [() => props.videoBlob, () => props.webcamStream, videoPlayer],
   async () => {
-    if (
+    if (props.isWebcam && props.webcamStream && videoPlayer.value) {
+      await nextTick()
+      videoPlayer.value.srcObject = props.webcamStream
+    } else if (
       props.processingStatus === 'completed' &&
       props.videoBlob &&
       videoPlayer.value
