@@ -2,6 +2,7 @@
 import * as cdk from 'aws-cdk-lib';
 import { BackendStack } from '../lib/backend-stack';
 import { FrontendStack } from '../lib/frontend-stack';
+import { InferenceStack } from '../lib/inference-stack';
 
 const app = new cdk.App();
 
@@ -17,6 +18,11 @@ const backendStack = new BackendStack(app, 'BackendStack', {
 
 // Deploy frontend stack
 const frontendStack = new FrontendStack(app, 'FrontendStack', {
+  env: env
+});
+
+// Deploy inference stack with EKS Auto Mode
+const inferenceStack = new InferenceStack(app, 'InferenceStack', {
   env: env
 });
 
