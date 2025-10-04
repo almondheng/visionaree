@@ -7,7 +7,7 @@ import {
 
 // API Configuration
 const API_BASE_URL =
-  'https://3x13ufwk43.execute-api.us-east-1.amazonaws.com/prod'
+  'https://g6mq8j3qre.execute-api.us-east-1.amazonaws.com/prod'
 
 // Types for API responses
 interface PresignedUrlResponse {
@@ -121,7 +121,9 @@ interface VideoStatusResponse {
   status: 'done' | 'processing' | 'pending' | 'error'
 }
 
-export async function checkVideoStatus(jobId: string): Promise<VideoStatusResponse> {
+export async function checkVideoStatus(
+  jobId: string
+): Promise<VideoStatusResponse> {
   const response = await fetch(`${API_BASE_URL}/video/${jobId}/status`, {
     method: 'GET',
     headers: {
@@ -320,14 +322,19 @@ export class VideoProcessingService {
     }
   }
 
-  async checkBackendStatus(videoId: string): Promise<'done' | 'processing' | 'pending' | 'error'> {
+  async checkBackendStatus(
+    videoId: string
+  ): Promise<'done' | 'processing' | 'pending' | 'error'> {
     try {
       // Use the format: upload-{videoId} for the job ID as defined in uploadVideoToS3
       const jobId = `upload-${videoId}`
       const statusResponse = await checkVideoStatus(jobId)
       return statusResponse.status
     } catch (error) {
-      console.error(`Failed to check backend status for video ${videoId}:`, error)
+      console.error(
+        `Failed to check backend status for video ${videoId}:`,
+        error
+      )
       // Return 'processing' as default to keep polling
       return 'processing'
     }
