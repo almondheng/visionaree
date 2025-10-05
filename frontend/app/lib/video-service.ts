@@ -341,4 +341,35 @@ export class VideoProcessingService {
   }
 }
 
+// Types for direct video analysis
+interface VideoAnalysisResponse {
+  success: boolean
+  filename: string
+  file_size: number
+  caption: string
+  status: string
+}
+
+export async function analyzeVideoChunk(
+  videoBlob: Blob,
+  filename: string
+): Promise<VideoAnalysisResponse> {
+  const formData = new FormData()
+  formData.append('video', videoBlob, filename)
+
+  const response = await fetch(`${API_BASE_URL}/video/analyze-direct`, {
+    method: 'POST',
+    body: formData,
+  })
+
+  if (!response.ok) {
+    const errorData = await response
+      .json()
+      .catch(() => ({ error: 'Unknown error' }))
+    throw new Error(errorData.error || `HTTP error! status: ${response.status}`)
+  }
+
+  return await response.json()
+}
+
 export const videoProcessingService = new VideoProcessingService()
