@@ -26,11 +26,15 @@ export class WebcamRecorder {
     await this.loadFromIndexedDB()
     this.recordingStartTime = Date.now()
 
-    const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-      ? 'video/webm;codecs=vp9'
-      : MediaRecorder.isTypeSupported('video/webm')
+    const mimeType = MediaRecorder.isTypeSupported('video/webm')
       ? 'video/webm'
       : ''
+
+    console.log('WebcamRecorder: Selected MIME type:', mimeType)
+    console.log(
+      'WebcamRecorder: WebM support:',
+      MediaRecorder.isTypeSupported('video/webm')
+    )
 
     this.mediaRecorder = new MediaRecorder(
       stream,
@@ -62,10 +66,15 @@ export class WebcamRecorder {
     }
 
     this.mediaRecorder.start()
+    console.log(
+      'WebcamRecorder: Recording started with MIME type:',
+      this.mediaRecorder.mimeType
+    )
 
     this.chunkInterval = setInterval(() => {
       if (this.mediaRecorder?.state === 'recording') {
-        this.mediaRecorder.requestData()
+        this.mediaRecorder.stop()
+        this.mediaRecorder.start()
       }
     }, 5000)
   }

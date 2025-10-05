@@ -14,7 +14,7 @@ export interface VideoRecord {
 class VideoDatabase {
   private db: IDBDatabase | null = null
   private readonly dbName = 'VisionareeDB'
-  private readonly dbVersion = 1
+  private readonly dbVersion = 2
   private readonly storeName = 'videos'
 
   async init(): Promise<void> {
