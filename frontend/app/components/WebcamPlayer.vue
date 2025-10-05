@@ -1,16 +1,19 @@
 <template>
-  <VideoPlayer
-    v-if="!showRecording"
-    :processing-status="processingStatus"
-    :is-webcam="true"
-    :webcam-stream="stream"
-    :webcam-error="error"
-  />
-  <WebcamRecordingPlayer
-    v-else
-    :chunks="recorder.getChunks()"
-    :total-duration="recorder.getTotalDuration()"
-  />
+  <div class="aspect-video w-full h-full">
+    <VideoPlayer
+      v-if="!showRecording"
+      :processing-status="processingStatus"
+      :is-webcam="true"
+      :webcam-stream="stream"
+      :webcam-error="error"
+    />
+    <WebcamRecordingPlayer
+      v-else
+      ref="recordingPlayerRef"
+      :chunks="recorder.getChunks()"
+      :total-duration="recorder.getTotalDuration()"
+    />
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -23,8 +26,15 @@ const stream = ref<MediaStream | null>(null)
 const error = ref<string>('')
 const recorder = new WebcamRecorder()
 const showRecording = ref(false)
+const recordingPlayerRef = ref<InstanceType<
+  typeof WebcamRecordingPlayer
+> | null>(null)
 
 const isStreaming = computed(() => !!stream.value)
+const captions = computed(() => recorder.getChunkCaptions())
+const captionProcessingStatus = computed(() =>
+  recorder.getCaptionProcessingStatus()
+)
 
 const processingStatus = computed(() => {
   if (error.value) return 'error' as const
@@ -44,6 +54,14 @@ const startCamera = async () => {
   } catch (err) {
     error.value = 'Failed to access camera'
     console.error('Camera error:', err)
+  }
+}
+
+const switchToPlayback = async () => {
+  // Keep recording but switch to playback view
+  if (recorder.getChunks().length > 0) {
+    await recorder.saveToIndexedDB()
+    showRecording.value = true
   }
 }
 
@@ -74,11 +92,24 @@ onBeforeUnmount(() => {
   stopCamera()
 })
 
+const seekTo = (time: number) => {
+  recordingPlayerRef.value?.seekTo(time)
+}
+
+const switchToLive = () => {
+  showRecording.value = false
+}
+
 defineExpose({
   startCamera,
   stopCamera,
+  switchToPlayback,
+  switchToLive,
   isStreaming,
   showRecording,
   clearRecording,
+  captions,
+  captionProcessingStatus,
+  seekTo,
 })
 </script>

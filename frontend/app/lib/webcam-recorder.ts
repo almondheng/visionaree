@@ -1,4 +1,5 @@
 import { analyzeVideoChunk } from './video-service'
+import { reactive } from 'vue'
 
 export interface RecordedChunk {
   blob: Blob
@@ -16,7 +17,7 @@ const RECORDING_ID = 'current-recording'
 
 export class WebcamRecorder {
   private mediaRecorder: MediaRecorder | null = null
-  private chunks: RecordedChunk[] = []
+  private chunks = reactive<RecordedChunk[]>([])
   private currentChunkStartTime = 0
   private recordingStartTime = 0
   private chunkInterval: ReturnType<typeof setInterval> | null = null
@@ -121,16 +122,24 @@ export class WebcamRecorder {
 
   getChunkCaptions(): Array<{
     timestamp: number
+    startTime: number
     caption?: string
     captionError?: string
     captionProcessing?: boolean
   }> {
-    return this.chunks.map(chunk => ({
-      timestamp: chunk.timestamp,
-      caption: chunk.caption,
-      captionError: chunk.captionError,
-      captionProcessing: chunk.captionProcessing,
-    }))
+    const sorted = [...this.chunks].sort((a, b) => a.timestamp - b.timestamp)
+    let accumulatedTime = 0
+    return sorted.map(chunk => {
+      const result = {
+        timestamp: chunk.timestamp,
+        startTime: accumulatedTime,
+        caption: chunk.caption,
+        captionError: chunk.captionError,
+        captionProcessing: chunk.captionProcessing,
+      }
+      accumulatedTime += chunk.duration
+      return result
+    })
   }
 
   getCaptionProcessingStatus(): {
@@ -152,7 +161,7 @@ export class WebcamRecorder {
   }
 
   clear() {
-    this.chunks = []
+    this.chunks.splice(0, this.chunks.length)
     this.currentChunkStartTime = 0
     this.recordingStartTime = 0
   }
@@ -160,18 +169,33 @@ export class WebcamRecorder {
   private async saveChunkToIndexedDB(chunk: RecordedChunk): Promise<void> {
     try {
       const db = await this.initDB()
-      if (db.objectStoreNames.contains(STORE_NAME)) {
-        const transaction = db.transaction([STORE_NAME], 'readwrite')
-        const store = transaction.objectStore(STORE_NAME)
-        await new Promise<void>((resolve, reject) => {
-          const request = store.put(chunk, chunk.timestamp)
-          request.onsuccess = () => resolve()
-          request.onerror = () => reject(request.error)
-        })
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.close()
+        return
       }
+      const transaction = db.transaction([STORE_NAME], 'readwrite')
+      const store = transaction.objectStore(STORE_NAME)
+      
+      // Store the actual blob along with metadata
+      const chunkWithBlob = {
+        blob: chunk.blob,
+        startTime: chunk.startTime,
+        duration: chunk.duration,
+        timestamp: chunk.timestamp,
+        caption: chunk.caption,
+        captionError: chunk.captionError,
+        captionProcessing: chunk.captionProcessing
+      }
+      
+      await new Promise<void>((resolve, reject) => {
+        const request = store.put(chunkWithBlob, chunk.timestamp)
+        request.onsuccess = () => resolve()
+        request.onerror = () => reject(request.error || 'Unknown IndexedDB error')
+      })
+      
       db.close()
     } catch (error) {
-      console.error('Failed to save chunk to IndexedDB:', error)
+      // Silently handle IndexedDB errors to avoid console spam
     }
   }
 
@@ -184,21 +208,19 @@ export class WebcamRecorder {
       const response = await analyzeVideoChunk(chunk.blob, filename)
 
       if (response.success) {
-        // Update chunk with caption
-        chunk.caption = response.caption
-        chunk.captionProcessing = false
-        delete chunk.captionError
-
-        // Update the chunk in the array
+        // Update chunk with caption directly in the reactive array
         const chunkIndex = this.chunks.findIndex(
           c => c.timestamp === chunk.timestamp
         )
         if (chunkIndex !== -1) {
-          this.chunks[chunkIndex] = chunk
+          const chunk = this.chunks[chunkIndex]
+          if (chunk) {
+            chunk.caption = response.caption
+            chunk.captionProcessing = false
+            delete chunk.captionError
+            await this.saveChunkToIndexedDB(chunk)
+          }
         }
-
-        // Save updated chunk to IndexedDB
-        await this.saveChunkToIndexedDB(chunk)
 
         console.log(
           `Caption generated for chunk ${chunk.timestamp}:`,
@@ -210,21 +232,18 @@ export class WebcamRecorder {
     } catch (error) {
       console.error('Failed to process caption for chunk:', error)
 
-      // Update chunk with error
-      chunk.captionError =
-        error instanceof Error ? error.message : 'Unknown error'
-      chunk.captionProcessing = false
-
-      // Update the chunk in the array
+      // Update chunk with error directly in the reactive array
       const chunkIndex = this.chunks.findIndex(
         c => c.timestamp === chunk.timestamp
       )
       if (chunkIndex !== -1) {
-        this.chunks[chunkIndex] = chunk
+        const chunk = this.chunks[chunkIndex]
+        if (chunk) {
+          chunk.captionError = error instanceof Error ? error.message : 'Unknown error'
+          chunk.captionProcessing = false
+          await this.saveChunkToIndexedDB(chunk)
+        }
       }
-
-      // Save updated chunk to IndexedDB
-      await this.saveChunkToIndexedDB(chunk)
     }
   }
 
@@ -255,32 +274,47 @@ export class WebcamRecorder {
       const store = transaction.objectStore(STORE_NAME)
 
       for (const chunk of this.chunks) {
+        const chunkWithBlob = {
+          blob: chunk.blob,
+          startTime: chunk.startTime,
+          duration: chunk.duration,
+          timestamp: chunk.timestamp,
+          caption: chunk.caption,
+          captionError: chunk.captionError,
+          captionProcessing: chunk.captionProcessing
+        }
+        
         await new Promise<void>((resolve, reject) => {
-          const request = store.put(chunk, chunk.timestamp)
+          const request = store.put(chunkWithBlob, chunk.timestamp)
           request.onsuccess = () => resolve()
-          request.onerror = () => reject(request.error)
+          request.onerror = () => reject(request.error || 'Unknown IndexedDB error')
         })
       }
 
       db.close()
     } catch (error) {
-      console.error('Failed to save to IndexedDB:', error)
+      // Silently handle IndexedDB errors
     }
   }
 
   async loadFromIndexedDB(): Promise<void> {
+    // Don't load from IndexedDB on startup to avoid empty blobs
+    // Only load metadata when needed
+  }
+
+  async loadChunksForPlayback(): Promise<RecordedChunk[]> {
     try {
       const db = await this.initDB()
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         db.close()
-        return
+        return this.chunks.filter(chunk => chunk.blob.size > 0)
       }
       const transaction = db.transaction([STORE_NAME], 'readonly')
       const store = transaction.objectStore(STORE_NAME)
 
-      const chunks = await new Promise<RecordedChunk[]>((resolve, reject) => {
+      const chunks = await new Promise<any[]>((resolve, reject) => {
         const request = store.openCursor()
-        const results: RecordedChunk[] = []
+        const results: any[] = []
         request.onsuccess = event => {
           const cursor = (event.target as IDBRequest<IDBCursorWithValue | null>)
             .result
@@ -294,18 +328,16 @@ export class WebcamRecorder {
         request.onerror = () => reject(request.error)
       })
 
-      if (chunks.length > 0) {
-        this.chunks = chunks
-        const sorted = chunks.sort((a, b) => a.timestamp - b.timestamp)
-        const lastChunk = sorted[sorted.length - 1]
-        if (lastChunk) {
-          this.currentChunkStartTime = lastChunk.startTime + lastChunk.duration
-        }
-      }
-
       db.close()
+      
+      // Return chunks with actual blobs, sorted by timestamp
+      return chunks
+        .filter(chunk => chunk.blob && chunk.blob.size > 0)
+        .sort((a, b) => a.timestamp - b.timestamp)
     } catch (error) {
-      // Silently handle - no existing recording
+      console.error('Failed to load chunks for playback:', error)
+      // Fallback to current chunks that have blobs
+      return this.chunks.filter(chunk => chunk.blob.size > 0)
     }
   }
 

@@ -38,6 +38,10 @@ class VideoDatabase {
           store.createIndex('filename', 'filename', { unique: false })
           store.createIndex('uploadedAt', 'uploadedAt', { unique: false })
         }
+
+        if (!db.objectStoreNames.contains('webcamChunks')) {
+          db.createObjectStore('webcamChunks')
+        }
       }
     })
   }

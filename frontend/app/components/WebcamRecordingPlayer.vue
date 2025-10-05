@@ -110,13 +110,25 @@ const appendNextChunk = async () => {
   if (!sourceBuffer || sourceBuffer.updating || appendedChunks >= props.chunks.length) return
   
   const chunk = props.chunks[appendedChunks]
-  if (!chunk) return
+  if (!chunk || !chunk.blob || chunk.blob.size === 0) {
+    appendedChunks++
+    return
+  }
   
   const arrayBuffer = await chunk.blob.arrayBuffer()
   
   try {
     sourceBuffer.appendBuffer(arrayBuffer)
     appendedChunks++
+    
+    // Update duration as chunks are appended
+    if (mediaSource && mediaSource.readyState === 'open' && appendedChunks === props.chunks.length) {
+      try {
+        mediaSource.endOfStream()
+      } catch (e) {
+        console.warn('Failed to end stream:', e)
+      }
+    }
   } catch (e) {
     console.error('Error appending chunk:', e)
   }
@@ -146,8 +158,17 @@ const onProgressChange = (value: number[] | undefined) => {
   const targetTime = value[0]
   if (targetTime === undefined) return
   
-  videoPlayer.value.currentTime = targetTime
-  currentTime.value = targetTime
+  // Clamp seek time to available duration
+  const clampedTime = Math.min(targetTime, videoPlayer.value.duration || totalDuration)
+  
+  try {
+    videoPlayer.value.currentTime = clampedTime
+    currentTime.value = clampedTime
+  } catch (e) {
+    console.warn('Seek failed:', e)
+    // Fallback to current time if seek fails
+    currentTime.value = videoPlayer.value.currentTime
+  }
 }
 
 const formatDuration = (seconds: number): string => {
@@ -162,7 +183,11 @@ const formatDuration = (seconds: number): string => {
 
 watch(() => props.chunks.length, (newLength) => {
   if (newLength > 0 && !mediaSource) {
-    setupMediaSource()
+    // Only setup if we have chunks with actual blobs
+    const hasValidChunks = props.chunks.some(chunk => chunk.blob && chunk.blob.size > 0)
+    if (hasValidChunks) {
+      setupMediaSource()
+    }
   } else if (newLength > appendedChunks && sourceBuffer && !sourceBuffer.updating) {
     appendNextChunk()
   }
@@ -173,6 +198,26 @@ watch(() => videoPlayer.value, () => {
     setupMediaSource()
   }
 }, { immediate: true })
+
+const seekTo = (time: number) => {
+  if (!videoPlayer.value) return
+  
+  // Clamp seek time to available duration
+  const clampedTime = Math.min(time, videoPlayer.value.duration || totalDuration)
+  
+  try {
+    videoPlayer.value.currentTime = clampedTime
+    currentTime.value = clampedTime
+  } catch (e) {
+    console.warn('Seek failed:', e)
+    // Fallback to current time if seek fails
+    currentTime.value = videoPlayer.value.currentTime
+  }
+}
+
+defineExpose({
+  seekTo
+})
 
 onBeforeUnmount(() => {
   if (videoPlayer.value?.src) {

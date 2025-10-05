@@ -18,11 +18,13 @@
         </div>
 
         <div class="xl:col-span-1 h-full max-h-[500px]">
-          <VideoPromptSkeleton v-if="!isBackendReady" />
-          <VideoPrompt v-else-if="isBackendReady" ref="videoPromptRef" video-id="camera-live" @seek-to-timestamp="() => {}" />
-          <div v-else class="h-full flex items-center justify-center">
-            <p class="text-muted-foreground">Loading...</p>
-          </div>
+          <ClientOnly>
+            <WebcamCaptions
+              :captions="webcamCaptions"
+              :processing-status="webcamProcessingStatus"
+              @seek-to-timestamp="seekToTimestamp"
+            />
+          </ClientOnly>
         </div>
       </div>
 
@@ -56,32 +58,25 @@
 
             <div class="flex gap-3 pt-4 border-t">
               <ClientOnly>
-                <Button v-if="!isCameraActive && !isShowingRecording" @click="startCamera">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                Start Camera
-              </Button>
-              <Button v-else-if="isCameraActive" variant="destructive" @click="stopCamera">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
-                </svg>
-                Stop Recording
-              </Button>
-              <Button v-if="isShowingRecording" @click="startCamera">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-                New Recording
-              </Button>
-              <Button v-if="isShowingRecording" variant="outline" @click="clearRecording">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
-                Clear
-              </Button>
+                <Button v-if="isShowingRecording" @click="switchToLive">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                  Switch to Live
+                </Button>
+                <Button v-else @click="switchToPlayback">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  View Recording
+                </Button>
+                <Button v-if="isShowingRecording" variant="outline" @click="clearRecording">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                  Clear
+                </Button>
               </ClientOnly>
             </div>
           </CardContent>
@@ -95,23 +90,26 @@
 import { ref, computed } from 'vue'
 import { Button } from '~/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '~/components/ui/card'
-import VideoPrompt from '~/components/VideoPrompt.vue'
-import VideoPromptSkeleton from '~/components/VideoPromptSkeleton.vue'
 import WebcamPlayer from '~/components/WebcamPlayer.vue'
+import WebcamCaptions from '~/components/WebcamCaptions.vue'
 
 const webcamPlayerRef = ref<InstanceType<typeof WebcamPlayer> | null>(null)
-const videoPromptRef = ref<InstanceType<typeof VideoPrompt> | null>(null)
-const isBackendReady = ref(false)
 
 const isCameraActive = computed(() => webcamPlayerRef.value?.isStreaming || false)
 const isShowingRecording = computed(() => webcamPlayerRef.value?.showRecording || false)
+const webcamCaptions = computed(() => webcamPlayerRef.value?.captions || [])
+const webcamProcessingStatus = computed(() => webcamPlayerRef.value?.captionProcessingStatus || { total: 0, processing: 0, completed: 0, failed: 0 })
 const cameraStatus = computed(() => {
   if (isShowingRecording.value) return 'Recording Available'
   return isCameraActive.value ? 'Active' : 'Inactive'
 })
 
-const startCamera = async () => {
-  await webcamPlayerRef.value?.startCamera()
+const switchToLive = () => {
+  webcamPlayerRef.value?.switchToLive()
+}
+
+const switchToPlayback = () => {
+  webcamPlayerRef.value?.switchToPlayback()
 }
 
 const stopCamera = () => {
@@ -122,8 +120,17 @@ const clearRecording = () => {
   webcamPlayerRef.value?.clearRecording()
 }
 
+const seekToTimestamp = async (timestamp: number) => {
+  if (!isShowingRecording.value) {
+    webcamPlayerRef.value?.switchToPlayback()
+    // Wait for playback to be ready
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+  webcamPlayerRef.value?.seekTo(timestamp)
+}
+
 onMounted(() => {
-  startCamera()
+  webcamPlayerRef.value?.startCamera()
 })
 
 useHead({
