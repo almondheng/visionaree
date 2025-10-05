@@ -14,15 +14,17 @@ MODEL_ID = "us.amazon.nova-pro-v1:0"
 
 
 def summarize_clip(
-    s3_uri: str, job_id: str = None, start_time: int = None
+    s3_uri: str = None, job_id: str = None, start_time: int = None, video_format: str = None, video_base64: str = None
 ) -> Dict[str, Any]:
     """
     Summarize a video segment using Amazon Bedrock Nova.
 
     Args:
-        s3_uri: Full S3 URI of the video segment (e.g., s3://bucket/path/to/video.mp4)
+        s3_uri: Full S3 URI of the video segment (for backward compatibility)
         job_id: Analysis job ID (optional, for logging/tracking purposes)
         start_time: Start time of the segment in seconds (optional, for logging/tracking purposes)
+        video_format: Video format (e.g., 'mp4', 'webm', 'mov'). If None, will auto-detect from URI extension
+        video_base64: Base64 encoded video data (alternative to s3_uri for direct processing)
 
     Returns:
         Dict containing caption and status information
@@ -45,7 +47,33 @@ def summarize_clip(
                     start_time if start_time is not None else extracted_start_time
                 )
 
-        logger.info(f"Summarizing segment {start_time} for job {job_id} at {s3_uri}")
+        # Validate input - need either s3_uri or video_base64
+        if not s3_uri and not video_base64:
+            raise ValueError("Either s3_uri or video_base64 must be provided")
+        
+        # Auto-detect format from file extension if not provided
+        if video_format is None:
+            if s3_uri:
+                file_extension = s3_uri.split('.')[-1].lower()
+            else:
+                file_extension = 'mp4'  # Default for base64 input
+            
+            # Map common extensions to Bedrock format names
+            format_mapping = {
+                'mp4': 'mp4',
+                'mov': 'mov', 
+                'mkv': 'mkv',
+                'webm': 'webm',
+                'avi': 'avi',
+                'flv': 'flv',
+                'mpeg': 'mpeg',
+                'mpg': 'mpeg',
+                'ts': 'ts'
+            }
+            video_format = format_mapping.get(file_extension, 'mp4')  # Default to mp4 if unknown
+        
+        input_source = "base64 data" if video_base64 else s3_uri
+        logger.info(f"Summarizing segment {start_time} for job {job_id} from {input_source} (format: {video_format})")
 
         system_msgs = [
             {
@@ -59,12 +87,14 @@ def summarize_clip(
                 "content": [
                     {
                         "video": {
-                            "format": "mp4",
-                            "source": {
+                            "format": video_format,
+                            "source": ({
                                 "s3Location": {
                                     "uri": s3_uri,
                                 }
-                            },
+                            } if s3_uri else {
+                                "bytes": video_base64
+                            }),
                         }
                     },
                     {

@@ -65,17 +65,43 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         if content_type.startswith('multipart/form-data'):
             # Parse multipart form data
             video_data, original_filename = parse_multipart_video(body, content_type)
-        elif content_type.startswith('video/') or content_type.startswith('application/octet-stream'):
+        elif (content_type.startswith('video/') or 
+              content_type.startswith('application/octet-stream') or
+              content_type in ['video/mp4', 'video/quicktime', 'video/x-matroska', 
+                              'video/webm', 'video/x-msvideo', 'video/x-flv', 
+                              'video/mpeg', 'video/mp2t']):
             # Direct binary video upload
             video_data = body if isinstance(body, bytes) else body.encode()
-            original_filename = headers.get('x-filename', 'video.mp4')
+            
+            # Determine filename based on content-type if x-filename not provided
+            default_filename = headers.get('x-filename')
+            if not default_filename:
+                content_type_to_extension = {
+                    'video/mp4': 'video.mp4',
+                    'video/webm': 'video.webm', 
+                    'video/quicktime': 'video.mov',
+                    'video/x-matroska': 'video.mkv',
+                    'video/x-msvideo': 'video.avi',
+                    'video/x-flv': 'video.flv',
+                    'video/mpeg': 'video.mpeg',
+                    'video/mp2t': 'video.ts'
+                }
+                default_filename = content_type_to_extension.get(content_type, 'video.mp4')
+            
+            original_filename = default_filename
+            logger.info(f"Binary upload detected: content-type={content_type}, filename={original_filename}")
         else:
-            return create_error_response(400, f"Unsupported content type: {content_type}")
+            return create_error_response(400, f"Unsupported content type: {content_type}. Please use multipart/form-data or a supported video MIME type.")
         
         if not video_data:
             return create_error_response(400, "No video data found in request")
         
         logger.info(f"Extracted video data: {len(video_data)} bytes, filename: {original_filename}")
+        
+        # Validate video format
+        format_validation = validate_video_format(original_filename, video_data)
+        if not format_validation['valid']:
+            return create_error_response(400, format_validation['error'])
         
         # Validate file size (limit to 50MB for Lambda)
         max_size = 50 * 1024 * 1024  # 50MB
@@ -83,7 +109,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             return create_error_response(413, f"File too large. Maximum size is {max_size // (1024*1024)}MB")
         
         # Process the video and run Bedrock inference
-        inference_result = process_video_for_inference(video_data, original_filename)
+        video_format = format_validation.get('format', '.mp4').lstrip('.')  # Remove leading dot
+        inference_result = process_video_for_inference(video_data, original_filename, video_format)
         
         return {
             'statusCode': 200,
@@ -166,65 +193,48 @@ def parse_multipart_video(body_bytes: bytes, content_type: str) -> tuple[Optiona
         return None, None
 
 
-def process_video_for_inference(video_data: bytes, filename: str) -> Dict[str, Any]:
+def process_video_for_inference(video_data: bytes, filename: str, video_format: str = 'mp4') -> Dict[str, Any]:
     """
     Process video data and run Bedrock inference.
     
     Args:
         video_data: Raw video file bytes
         filename: Original filename
+        video_format: Video format (e.g., 'mp4', 'webm', 'mov')
         
     Returns:
         Dict containing inference results
     """
     
-    temp_dir = None
     try:
-        # Create temporary directory for processing
-        temp_dir = tempfile.mkdtemp()
+        # Get basic video info for response
+        video_info = {
+            'file_size': len(video_data),
+            'format': video_format
+        }
+        logger.info(f"Processing video: {len(video_data)} bytes, format: {video_format}")
         
-        # Save video to temporary file
-        input_path = os.path.join(temp_dir, f"input_{filename}")
-        with open(input_path, 'wb') as f:
-            f.write(video_data)
+        # Use original video directly - encode as base64 for Bedrock
+        logger.info("Encoding video as base64 for direct Bedrock processing (no S3 upload)")
         
-        logger.info(f"Saved video to temporary file: {input_path}")
-        
-        # Get basic video info for response (optional, for debugging)
-        video_info = get_simple_video_info(input_path)
-        
-        # Use original video directly - assume it's already in correct format
-        inference_path = input_path
-        logger.info("Using original video format directly (no re-encoding)")
-        
-        # Upload video to a temporary S3 location for Bedrock
-        # We need S3 URI for Bedrock, so create a temporary upload
-        temp_s3_uri = upload_temp_video_to_s3(inference_path)
-        
-        if not temp_s3_uri:
-            return {
-                'success': False,
-                'error': 'Failed to upload video for Bedrock processing'
-            }
+        # Encode video data to base64
+        video_base64 = base64.b64encode(video_data).decode('utf-8')
+        logger.info(f"Encoded video to base64: {len(video_base64)} characters")
         
         try:
-            # Run Bedrock inference
-            logger.info(f"Running Bedrock inference on video: {temp_s3_uri}")
+            # Run Bedrock inference with base64 data
+            logger.info("Running Bedrock inference with base64 video data")
             
             inference_result = summarize_clip(
-                s3_uri=temp_s3_uri,
                 job_id="direct-inference",
-                start_time=0
+                start_time=0,
+                video_format=video_format,
+                video_base64=video_base64
             )
-            
-            # Clean up temporary S3 object
-            # disable cleanup for faster response
-            # cleanup_temp_s3_object(temp_s3_uri)
             
             # Prepare clean response with only essential data
             response = {
                 'success': True,
-                'filename': filename,
                 'file_size': video_info.get('file_size', 0),
                 'caption': inference_result.get('caption'),
                 'status': inference_result.get('status')
@@ -237,8 +247,7 @@ def process_video_for_inference(video_data: bytes, filename: str) -> Dict[str, A
             return response
             
         except Exception as e:
-            # Make sure to clean up S3 object even if inference fails
-            cleanup_temp_s3_object(temp_s3_uri)
+            # No cleanup needed for base64 processing
             raise
         
     except Exception as e:
@@ -249,14 +258,83 @@ def process_video_for_inference(video_data: bytes, filename: str) -> Dict[str, A
         }
         
     finally:
-        # Clean up temporary directory
-        if temp_dir and os.path.exists(temp_dir):
-            try:
-                import shutil
-                shutil.rmtree(temp_dir)
-                logger.info("Cleaned up temporary directory")
-            except Exception as e:
-                logger.warning(f"Failed to clean up temp directory: {str(e)}")
+        # No cleanup needed for base64 processing
+        pass
+
+
+def validate_video_format(filename: str, video_data: bytes) -> Dict[str, Any]:
+    """
+    Validate that the uploaded file is MP4 format (required by Bedrock Nova).
+    
+    Args:
+        filename: Original filename
+        video_data: Raw video file bytes
+        
+    Returns:
+        Dict with 'valid' boolean and 'error' message if invalid
+    """
+    
+    # Bedrock Nova supported formats (from AWS docs)
+    SUPPORTED_FORMATS = {
+        '.mp4': {'mime': 'video/mp4', 'signatures': [b'ftyp']},
+        '.mov': {'mime': 'video/quicktime', 'signatures': [b'ftyp', b'moov']},
+        '.mkv': {'mime': 'video/x-matroska', 'signatures': [b'\x1a\x45\xdf\xa3']},
+        '.webm': {'mime': 'video/webm', 'signatures': [b'\x1a\x45\xdf\xa3']},
+        '.avi': {'mime': 'video/x-msvideo', 'signatures': [b'RIFF']},
+        '.flv': {'mime': 'video/x-flv', 'signatures': [b'FLV']},
+        '.mpeg': {'mime': 'video/mpeg', 'signatures': [b'\x00\x00\x01\xba', b'\x00\x00\x01\xb3']},
+        '.mpg': {'mime': 'video/mpeg', 'signatures': [b'\x00\x00\x01\xba', b'\x00\x00\x01\xb3']},
+        '.ts': {'mime': 'video/mp2t', 'signatures': [b'G']}
+    }
+    
+    try:
+        # Check file extension
+        if not filename:
+            return {'valid': False, 'error': 'No filename provided'}
+        
+        file_extension = None
+        for ext in SUPPORTED_FORMATS.keys():
+            if filename.lower().endswith(ext):
+                file_extension = ext
+                break
+        
+        if not file_extension:
+            supported_list = ', '.join(SUPPORTED_FORMATS.keys())
+            return {
+                'valid': False, 
+                'error': f'Unsupported file format. Supported formats: {supported_list}'
+            }
+        
+        # Basic file signature validation (magic bytes check)
+        if len(video_data) < 12:  # Need at least 12 bytes to check signatures
+            return {'valid': False, 'error': 'File too small to be a valid video'}
+        
+        # Check for expected magic bytes/signatures
+        format_info = SUPPORTED_FORMATS[file_extension]
+        signature_found = False
+        
+        for signature in format_info['signatures']:
+            # Check first 50 bytes for signature (some formats have signatures not at the very beginning)
+            search_bytes = video_data[:50]
+            if signature in search_bytes:
+                signature_found = True
+                break
+        
+        if not signature_found:
+            logger.warning(f"No expected signature found for {file_extension} format, but proceeding anyway")
+            # Don't fail here - signature check is just a warning, file extension is sufficient
+            # Note: WebM and MKV both use Matroska container with same signature
+        
+        logger.info(f"Video format validation passed: {filename} -> {file_extension} (MIME: {format_info['mime']})")
+        return {
+            'valid': True,
+            'format': file_extension,
+            'mime_type': format_info['mime']
+        }
+        
+    except Exception as e:
+        logger.error(f"Error validating video format: {str(e)}")
+        return {'valid': False, 'error': f'Format validation error: {str(e)}'}
 
 
 def get_simple_video_info(video_path: str) -> Dict[str, Any]:
@@ -397,7 +475,8 @@ def parse_basic_video_info(ffmpeg_output: str) -> Dict[str, Any]:
 
 
 
-def upload_temp_video_to_s3(video_path: str) -> Optional[str]:
+# Commented out - using base64 instead of S3 upload
+# def upload_temp_video_to_s3(video_path: str) -> Optional[str]:
     """
     Upload video to a temporary S3 location for Bedrock processing.
     
@@ -419,8 +498,9 @@ def upload_temp_video_to_s3(video_path: str) -> Optional[str]:
             logger.error("SEGMENTS_BUCKET_NAME environment variable not set")
             return None
         
-        # Create unique key for temporary file
-        temp_key = f"temp/direct-inference/{uuid.uuid4()}.mp4"
+        # Preserve original file extension for Bedrock format detection
+        file_extension = os.path.splitext(video_path)[1] or '.mp4'
+        temp_key = f"temp/direct-inference/{uuid.uuid4()}{file_extension}"
         
         # Upload file
         s3_client.upload_file(video_path, bucket_name, temp_key)
@@ -435,7 +515,8 @@ def upload_temp_video_to_s3(video_path: str) -> Optional[str]:
         return None
 
 
-def cleanup_temp_s3_object(s3_uri: str) -> None:
+# Commented out - using base64 instead of S3 upload
+# def cleanup_temp_s3_object(s3_uri: str) -> None:
     """
     Clean up temporary S3 object.
     

@@ -292,8 +292,9 @@ X-Filename: clip.mp4
 ### Requirements and Limitations
 
 - **File Size**: Maximum 50MB
-- **Format**: Should be in Bedrock-compatible format (MP4 with H.264 recommended)
+- **Supported Formats**: MP4, MOV, MKV, WebM, AVI, FLV, MPEG, MPG, TS (supported by Bedrock Nova)
 - **Processing**: Videos are used directly without re-encoding for faster response times
+- **Bedrock Compatibility**: All supported formats are natively accepted by Bedrock Nova model
 
 ### Response Format
 
@@ -454,16 +455,18 @@ The endpoint processes videos for immediate Bedrock analysis:
 |-------------|-------|-------------|
 | 400 | Request body required | No video data in request |
 | 400 | Unsupported content type | Content-Type not supported |
+| 400 | Unsupported file format | File extension not in supported list (MP4, MOV, MKV, WebM, AVI, FLV, MPEG, MPG, TS) |
 | 400 | No video data found | Could not extract video from request |
+| 400 | File too small | File too small to be a valid video |
 | 413 | File too large | Video exceeds 50MB limit |
 | 500 | Processing error | Video processing or Bedrock inference failed |
 
 ### Performance Notes
 
-- **Processing Time**: Typically 5-15 seconds (no re-encoding for faster response)
-- **Memory Usage**: Up to 1GB for video processing
+- **Processing Time**: Typically 3-10 seconds (base64 encoding, no S3 upload/cleanup overhead)
+- **Memory Usage**: Up to 1GB for video processing and base64 encoding
 - **Concurrent Requests**: Limited by Lambda concurrency (can be adjusted)
-- **Temporary Storage**: Videos are temporarily stored in S3 for Bedrock processing, then immediately deleted
+- **Direct Processing**: Videos are encoded as base64 and sent directly to Bedrock (no S3 storage required)
 
 ### Security Considerations
 
