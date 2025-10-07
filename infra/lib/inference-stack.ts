@@ -21,9 +21,23 @@ export class InferenceStack extends cdk.Stack {
     const clusterRole = new iam.Role(this, 'ClusterRole', {
       assumedBy: new iam.ServicePrincipal('eks.amazonaws.com'),
       managedPolicies: [
-        iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonEKSClusterPolicy')
+        iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonEKSClusterPolicy'),
+        // Required policies for EKS Auto Mode
+        iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonEKSBlockStoragePolicy'),
+        iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonEKSComputePolicy'),
+        iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonEKSLoadBalancingPolicy'),
+        iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonEKSNetworkingPolicy')
       ]
     });
+
+    // Add sts:TagSession to the cluster role's trust policy (required for EKS Auto Mode)
+    clusterRole.assumeRolePolicy?.addStatements(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        principals: [new iam.ServicePrincipal('eks.amazonaws.com')],
+        actions: ['sts:AssumeRole', 'sts:TagSession']
+      })
+    );
 
     // Create EKS cluster with Auto Mode
     this.cluster = new eks.CfnCluster(this, 'InferenceCluster', {
