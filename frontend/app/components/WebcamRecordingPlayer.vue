@@ -83,46 +83,57 @@ const setupMediaSource = async () => {
 
   mediaSource.addEventListener('sourceopen', async () => {
     if (!mediaSource) return
-    
-    const mimeType = MediaSource.isTypeSupported('video/webm; codecs="vp9"')
-      ? 'video/webm; codecs="vp9"'
-      : 'video/webm'
-    
+
+    const mimeType = 'video/webm; codecs="vp8"'
+
     if (!MediaSource.isTypeSupported(mimeType)) {
       console.error('MIME type not supported:', mimeType)
       return
     }
-    
+
     sourceBuffer = mediaSource.addSourceBuffer(mimeType)
     sourceBuffer.mode = 'sequence'
-    
+
     sourceBuffer.addEventListener('updateend', () => {
-      if (appendedChunks < props.chunks.length && sourceBuffer && !sourceBuffer.updating) {
+      if (
+        appendedChunks < props.chunks.length &&
+        sourceBuffer &&
+        !sourceBuffer.updating
+      ) {
         appendNextChunk()
       }
     })
-    
+
     appendNextChunk()
   })
 }
 
 const appendNextChunk = async () => {
-  if (!sourceBuffer || sourceBuffer.updating || appendedChunks >= props.chunks.length) return
-  
+  if (
+    !sourceBuffer ||
+    sourceBuffer.updating ||
+    appendedChunks >= props.chunks.length
+  )
+    return
+
   const chunk = props.chunks[appendedChunks]
   if (!chunk || !chunk.blob || chunk.blob.size === 0) {
     appendedChunks++
     return
   }
-  
+
   const arrayBuffer = await chunk.blob.arrayBuffer()
-  
+
   try {
     sourceBuffer.appendBuffer(arrayBuffer)
     appendedChunks++
-    
+
     // Update duration as chunks are appended
-    if (mediaSource && mediaSource.readyState === 'open' && appendedChunks === props.chunks.length) {
+    if (
+      mediaSource &&
+      mediaSource.readyState === 'open' &&
+      appendedChunks === props.chunks.length
+    ) {
       try {
         mediaSource.endOfStream()
       } catch (e) {
@@ -142,7 +153,7 @@ const onTimeUpdate = () => {
 
 const togglePlayPause = () => {
   if (!videoPlayer.value) return
-  
+
   if (videoPlayer.value.paused) {
     videoPlayer.value.play()
     isPlaying.value = true
@@ -154,13 +165,16 @@ const togglePlayPause = () => {
 
 const onProgressChange = (value: number[] | undefined) => {
   if (!value?.length || !videoPlayer.value) return
-  
+
   const targetTime = value[0]
   if (targetTime === undefined) return
-  
+
   // Clamp seek time to available duration
-  const clampedTime = Math.min(targetTime, videoPlayer.value.duration || totalDuration)
-  
+  const clampedTime = Math.min(
+    targetTime,
+    videoPlayer.value.duration || totalDuration
+  )
+
   try {
     videoPlayer.value.currentTime = clampedTime
     currentTime.value = clampedTime
@@ -176,35 +190,54 @@ const formatDuration = (seconds: number): string => {
   const minutes = Math.floor((seconds % 3600) / 60)
   const secs = Math.floor(seconds % 60)
   if (hours > 0) {
-    return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+    return `${hours}:${minutes.toString().padStart(2, '0')}:${secs
+      .toString()
+      .padStart(2, '0')}`
   }
   return `${minutes}:${secs.toString().padStart(2, '0')}`
 }
 
-watch(() => props.chunks.length, (newLength) => {
-  if (newLength > 0 && !mediaSource) {
-    // Only setup if we have chunks with actual blobs
-    const hasValidChunks = props.chunks.some(chunk => chunk.blob && chunk.blob.size > 0)
-    if (hasValidChunks) {
+watch(
+  () => props.chunks.length,
+  newLength => {
+    if (newLength > 0 && !mediaSource) {
+      // Only setup if we have chunks with actual blobs
+      const hasValidChunks = props.chunks.some(
+        chunk => chunk.blob && chunk.blob.size > 0
+      )
+      if (hasValidChunks) {
+        setupMediaSource()
+      }
+    } else if (
+      newLength > appendedChunks &&
+      sourceBuffer &&
+      !sourceBuffer.updating
+    ) {
+      appendNextChunk()
+    }
+  },
+  { immediate: true }
+)
+
+watch(
+  () => videoPlayer.value,
+  () => {
+    if (videoPlayer.value && !mediaSource) {
       setupMediaSource()
     }
-  } else if (newLength > appendedChunks && sourceBuffer && !sourceBuffer.updating) {
-    appendNextChunk()
-  }
-}, { immediate: true })
-
-watch(() => videoPlayer.value, () => {
-  if (videoPlayer.value && !mediaSource) {
-    setupMediaSource()
-  }
-}, { immediate: true })
+  },
+  { immediate: true }
+)
 
 const seekTo = (time: number) => {
   if (!videoPlayer.value) return
-  
+
   // Clamp seek time to available duration
-  const clampedTime = Math.min(time, videoPlayer.value.duration || totalDuration)
-  
+  const clampedTime = Math.min(
+    time,
+    videoPlayer.value.duration || totalDuration
+  )
+
   try {
     videoPlayer.value.currentTime = clampedTime
     currentTime.value = clampedTime
@@ -216,7 +249,7 @@ const seekTo = (time: number) => {
 }
 
 defineExpose({
-  seekTo
+  seekTo,
 })
 
 onBeforeUnmount(() => {

@@ -20,16 +20,18 @@ export class WebcamRecorder {
   private chunks = reactive<RecordedChunk[]>([])
   private currentChunkStartTime = 0
   private recordingStartTime = 0
-  private chunkInterval: ReturnType<typeof setInterval> | null = null
+  private chunkTimeout: ReturnType<typeof setTimeout> | null = null
+  private isRecording = false
+  private currentStream: MediaStream | null = null
   private dbInitialized = false
 
   async startRecording(stream: MediaStream) {
     await this.loadFromIndexedDB()
+    this.currentStream = stream
+    this.isRecording = true
     this.recordingStartTime = Date.now()
 
-    const mimeType = MediaRecorder.isTypeSupported('video/webm')
-      ? 'video/webm'
-      : ''
+    const mimeType = 'video/webm; codecs="vp8"'
 
     console.log('WebcamRecorder: Selected MIME type:', mimeType)
     console.log(
@@ -37,53 +39,16 @@ export class WebcamRecorder {
       MediaRecorder.isTypeSupported('video/webm')
     )
 
-    this.mediaRecorder = new MediaRecorder(
-      stream,
-      mimeType ? { mimeType } : undefined
-    )
-
-    this.mediaRecorder.ondataavailable = async event => {
-      if (event.data.size > 0) {
-        const actualDuration = (Date.now() - this.recordingStartTime) / 1000
-        const chunk: RecordedChunk = {
-          blob: event.data,
-          startTime: this.currentChunkStartTime,
-          duration: actualDuration,
-          timestamp: Date.now(),
-          captionProcessing: true,
-        }
-        this.chunks.push(chunk)
-        this.currentChunkStartTime += actualDuration
-        this.recordingStartTime = Date.now()
-
-        // Save initial chunk to IndexedDB
-        await this.saveChunkToIndexedDB(chunk)
-
-        // Process caption in background (don't await to avoid blocking)
-        this.processCaptionForChunk(chunk).catch((error: Error) => {
-          console.error('Background caption processing failed:', error)
-        })
-      }
-    }
-
-    this.mediaRecorder.start()
-    console.log(
-      'WebcamRecorder: Recording started with MIME type:',
-      this.mediaRecorder.mimeType
-    )
-
-    this.chunkInterval = setInterval(() => {
-      if (this.mediaRecorder?.state === 'recording') {
-        this.mediaRecorder.stop()
-        this.mediaRecorder.start()
-      }
-    }, 5000)
+    // Start the first recording segment
+    this.startNewRecorder()
   }
 
   stopRecording() {
-    if (this.chunkInterval) {
-      clearInterval(this.chunkInterval)
-      this.chunkInterval = null
+    this.isRecording = false
+
+    if (this.chunkTimeout) {
+      clearTimeout(this.chunkTimeout)
+      this.chunkTimeout = null
     }
 
     if (this.mediaRecorder) {
@@ -92,6 +57,8 @@ export class WebcamRecorder {
       }
       this.mediaRecorder = null
     }
+
+    this.currentStream = null
   }
 
   getChunks(): RecordedChunk[] {
@@ -166,6 +133,72 @@ export class WebcamRecorder {
     this.recordingStartTime = 0
   }
 
+  private startNewRecorder() {
+    if (!this.isRecording || !this.currentStream) {
+      return
+    }
+
+    const mimeType = 'video/webm; codecs="vp8"'
+
+    // Create a new MediaRecorder for this segment
+    this.mediaRecorder = new MediaRecorder(
+      this.currentStream,
+      mimeType ? { mimeType } : undefined
+    )
+
+    // Collect data for this segment
+    const segmentChunks: Blob[] = []
+
+    this.mediaRecorder.ondataavailable = event => {
+      if (event.data.size > 0) {
+        segmentChunks.push(event.data)
+      }
+    }
+
+    this.mediaRecorder.onstop = async () => {
+      if (segmentChunks.length > 0) {
+        // Combine all data from this segment into a single blob
+        const segmentBlob = new Blob(segmentChunks, { type: 'video/webm' })
+        const actualDuration = (Date.now() - this.recordingStartTime) / 1000
+
+        const chunk: RecordedChunk = {
+          blob: segmentBlob,
+          startTime: this.currentChunkStartTime,
+          duration: actualDuration,
+          timestamp: Date.now(),
+          captionProcessing: true,
+        }
+
+        this.chunks.push(chunk)
+        this.currentChunkStartTime += actualDuration
+
+        // Save initial chunk to IndexedDB
+        await this.saveChunkToIndexedDB(chunk)
+
+        // Process caption in background (don't await to avoid blocking)
+        this.processCaptionForChunk(chunk).catch((error: Error) => {
+          console.error('Background caption processing failed:', error)
+        })
+      }
+
+      // Only start next recorder if we're still recording
+      if (this.isRecording) {
+        this.recordingStartTime = Date.now()
+        this.startNewRecorder() // Start next segment
+      }
+    }
+
+    this.mediaRecorder.start()
+    console.log('WebcamRecorder: New recording segment started')
+
+    // Schedule stop after 5 seconds
+    this.chunkTimeout = setTimeout(() => {
+      if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
+        this.mediaRecorder.stop()
+      }
+    }, 5000)
+  }
+
   private async saveChunkToIndexedDB(chunk: RecordedChunk): Promise<void> {
     try {
       const db = await this.initDB()
@@ -175,7 +208,7 @@ export class WebcamRecorder {
       }
       const transaction = db.transaction([STORE_NAME], 'readwrite')
       const store = transaction.objectStore(STORE_NAME)
-      
+
       // Store the actual blob along with metadata
       const chunkWithBlob = {
         blob: chunk.blob,
@@ -184,15 +217,16 @@ export class WebcamRecorder {
         timestamp: chunk.timestamp,
         caption: chunk.caption,
         captionError: chunk.captionError,
-        captionProcessing: chunk.captionProcessing
+        captionProcessing: chunk.captionProcessing,
       }
-      
+
       await new Promise<void>((resolve, reject) => {
         const request = store.put(chunkWithBlob, chunk.timestamp)
         request.onsuccess = () => resolve()
-        request.onerror = () => reject(request.error || 'Unknown IndexedDB error')
+        request.onerror = () =>
+          reject(request.error || 'Unknown IndexedDB error')
       })
-      
+
       db.close()
     } catch (error) {
       // Silently handle IndexedDB errors to avoid console spam
@@ -239,7 +273,8 @@ export class WebcamRecorder {
       if (chunkIndex !== -1) {
         const chunk = this.chunks[chunkIndex]
         if (chunk) {
-          chunk.captionError = error instanceof Error ? error.message : 'Unknown error'
+          chunk.captionError =
+            error instanceof Error ? error.message : 'Unknown error'
           chunk.captionProcessing = false
           await this.saveChunkToIndexedDB(chunk)
         }
@@ -281,13 +316,14 @@ export class WebcamRecorder {
           timestamp: chunk.timestamp,
           caption: chunk.caption,
           captionError: chunk.captionError,
-          captionProcessing: chunk.captionProcessing
+          captionProcessing: chunk.captionProcessing,
         }
-        
+
         await new Promise<void>((resolve, reject) => {
           const request = store.put(chunkWithBlob, chunk.timestamp)
           request.onsuccess = () => resolve()
-          request.onerror = () => reject(request.error || 'Unknown IndexedDB error')
+          request.onerror = () =>
+            reject(request.error || 'Unknown IndexedDB error')
         })
       }
 
@@ -329,7 +365,7 @@ export class WebcamRecorder {
       })
 
       db.close()
-      
+
       // Return chunks with actual blobs, sorted by timestamp
       return chunks
         .filter(chunk => chunk.blob && chunk.blob.size > 0)
