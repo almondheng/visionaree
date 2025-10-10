@@ -145,8 +145,8 @@ export class WebcamRecorder {
     if (!this.isRecording || !this.currentStream) {
       return
     }
-    this.recordingStartTime = Date.now()
-    // Create a new MediaRecorder for this 5-second segment with proper WebM headers
+
+    // Create a new MediaRecorder for this 5-second segment - exactly like the HTML version
     this.mediaRecorder = new MediaRecorder(this.currentStream, {
       mimeType: this.selectedMimeType,
       videoBitsPerSecond: 500000, // 500 Kbps
@@ -154,6 +154,7 @@ export class WebcamRecorder {
 
     // Collect data for this segment
     const segmentChunks: Blob[] = []
+    const segmentStartTime = Date.now()
 
     this.mediaRecorder.ondataavailable = event => {
       if (event.data.size > 0) {
@@ -162,10 +163,10 @@ export class WebcamRecorder {
     }
 
     this.mediaRecorder.onstop = async () => {
-      await this.processSegment(segmentChunks)
+      await this.processSegment(segmentChunks, segmentStartTime)
     }
 
-    // Start recording without parameters to ensure proper WebM headers
+    // Start recording exactly like the working HTML version
     this.mediaRecorder.start()
     console.log('WebcamRecorder: New 5-second segment started')
 
@@ -177,11 +178,14 @@ export class WebcamRecorder {
     }, 5000)
   }
 
-  private async processSegment(segmentChunks: Blob[]) {
+  private async processSegment(
+    segmentChunks: Blob[],
+    segmentStartTime: number
+  ) {
     if (segmentChunks.length > 0) {
-      // Create the segment blob with proper WebM type - this ensures proper headers and duration
+      // Create the segment blob exactly like the working HTML version
       const segmentBlob = new Blob(segmentChunks, { type: 'video/webm' })
-      const actualDuration = (Date.now() - this.recordingStartTime) / 1000
+      const actualDuration = (Date.now() - segmentStartTime) / 1000
 
       const chunk: RecordedChunk = {
         blob: segmentBlob,

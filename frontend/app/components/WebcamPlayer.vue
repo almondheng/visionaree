@@ -47,7 +47,11 @@ const startCamera = async () => {
     error.value = ''
     showRecording.value = false
     stream.value = await navigator.mediaDevices.getUserMedia({
-      video: true,
+      video: {
+        width: 640,
+        height: 480,
+        frameRate: 15,
+      },
       audio: false,
     })
     recorder.startRecording(stream.value)
