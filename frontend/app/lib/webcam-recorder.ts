@@ -24,6 +24,7 @@ export class WebcamRecorder {
   private isRecording = false
   private currentStream: MediaStream | null = null
   private dbInitialized = false
+  private selectedMimeType = 'video/webm'
 
   async startRecording(stream: MediaStream) {
     await this.loadFromIndexedDB()
@@ -31,16 +32,23 @@ export class WebcamRecorder {
     this.isRecording = true
     this.recordingStartTime = Date.now()
 
-    const mimeType = 'video/webm; codecs="vp8"'
+    // Use the same MIME type fallback logic as the working HTML version
+    this.selectedMimeType = 'video/webm;codecs=vp9'
+    if (!MediaRecorder.isTypeSupported(this.selectedMimeType)) {
+      this.selectedMimeType = 'video/webm;codecs=vp8'
+      if (!MediaRecorder.isTypeSupported(this.selectedMimeType)) {
+        this.selectedMimeType = 'video/webm'
+      }
+    }
 
-    console.log('WebcamRecorder: Selected MIME type:', mimeType)
+    console.log('WebcamRecorder: Selected MIME type:', this.selectedMimeType)
     console.log(
       'WebcamRecorder: WebM support:',
       MediaRecorder.isTypeSupported('video/webm')
     )
 
-    // Start the first recording segment
-    this.startNewRecorder()
+    // Start first 5-second segment with proper WebM headers
+    this.startNewSegment()
   }
 
   stopRecording() {
@@ -133,18 +141,16 @@ export class WebcamRecorder {
     this.recordingStartTime = 0
   }
 
-  private startNewRecorder() {
+  private startNewSegment() {
     if (!this.isRecording || !this.currentStream) {
       return
     }
-
-    const mimeType = 'video/webm; codecs="vp8"'
-
-    // Create a new MediaRecorder for this segment
-    this.mediaRecorder = new MediaRecorder(
-      this.currentStream,
-      mimeType ? { mimeType } : undefined
-    )
+    this.recordingStartTime = Date.now()
+    // Create a new MediaRecorder for this 5-second segment with proper WebM headers
+    this.mediaRecorder = new MediaRecorder(this.currentStream, {
+      mimeType: this.selectedMimeType,
+      videoBitsPerSecond: 500000, // 500 Kbps
+    })
 
     // Collect data for this segment
     const segmentChunks: Blob[] = []
@@ -156,40 +162,12 @@ export class WebcamRecorder {
     }
 
     this.mediaRecorder.onstop = async () => {
-      if (segmentChunks.length > 0) {
-        // Combine all data from this segment into a single blob
-        const segmentBlob = new Blob(segmentChunks, { type: 'video/webm' })
-        const actualDuration = (Date.now() - this.recordingStartTime) / 1000
-
-        const chunk: RecordedChunk = {
-          blob: segmentBlob,
-          startTime: this.currentChunkStartTime,
-          duration: actualDuration,
-          timestamp: Date.now(),
-          captionProcessing: true,
-        }
-
-        this.chunks.push(chunk)
-        this.currentChunkStartTime += actualDuration
-
-        // Save initial chunk to IndexedDB
-        await this.saveChunkToIndexedDB(chunk)
-
-        // Process caption in background (don't await to avoid blocking)
-        this.processCaptionForChunk(chunk).catch((error: Error) => {
-          console.error('Background caption processing failed:', error)
-        })
-      }
-
-      // Only start next recorder if we're still recording
-      if (this.isRecording) {
-        this.recordingStartTime = Date.now()
-        this.startNewRecorder() // Start next segment
-      }
+      await this.processSegment(segmentChunks)
     }
 
+    // Start recording without parameters to ensure proper WebM headers
     this.mediaRecorder.start()
-    console.log('WebcamRecorder: New recording segment started')
+    console.log('WebcamRecorder: New 5-second segment started')
 
     // Schedule stop after 5 seconds
     this.chunkTimeout = setTimeout(() => {
@@ -197,6 +175,43 @@ export class WebcamRecorder {
         this.mediaRecorder.stop()
       }
     }, 5000)
+  }
+
+  private async processSegment(segmentChunks: Blob[]) {
+    if (segmentChunks.length > 0) {
+      // Create the segment blob with proper WebM type - this ensures proper headers and duration
+      const segmentBlob = new Blob(segmentChunks, { type: 'video/webm' })
+      const actualDuration = (Date.now() - this.recordingStartTime) / 1000
+
+      const chunk: RecordedChunk = {
+        blob: segmentBlob,
+        startTime: this.currentChunkStartTime,
+        duration: actualDuration,
+        timestamp: Date.now(),
+        captionProcessing: true,
+      }
+
+      this.chunks.push(chunk)
+      this.currentChunkStartTime += actualDuration
+
+      // Save initial chunk to IndexedDB
+      await this.saveChunkToIndexedDB(chunk)
+
+      // Process caption in background (don't await to avoid blocking)
+      this.processCaptionForChunk(chunk).catch((error: Error) => {
+        console.error('Background caption processing failed:', error)
+      })
+
+      console.log(
+        'WebcamRecorder: 5-second segment processed, duration:',
+        actualDuration
+      )
+    }
+
+    // Only start next segment if we're still recording
+    if (this.isRecording) {
+      this.startNewSegment() // Start next 5-second segment
+    }
   }
 
   private async saveChunkToIndexedDB(chunk: RecordedChunk): Promise<void> {

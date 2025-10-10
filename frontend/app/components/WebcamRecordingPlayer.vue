@@ -84,7 +84,14 @@ const setupMediaSource = async () => {
   mediaSource.addEventListener('sourceopen', async () => {
     if (!mediaSource) return
 
-    const mimeType = 'video/webm; codecs="vp8"'
+    // Use the same MIME type fallback logic as webcam-recorder.ts
+    let mimeType = 'video/webm;codecs=vp9'
+    if (!MediaSource.isTypeSupported(mimeType)) {
+      mimeType = 'video/webm;codecs=vp8'
+      if (!MediaSource.isTypeSupported(mimeType)) {
+        mimeType = 'video/webm'
+      }
+    }
 
     if (!MediaSource.isTypeSupported(mimeType)) {
       console.error('MIME type not supported:', mimeType)
@@ -172,7 +179,7 @@ const onProgressChange = (value: number[] | undefined) => {
   // Clamp seek time to available duration
   const clampedTime = Math.min(
     targetTime,
-    videoPlayer.value.duration || totalDuration
+    videoPlayer.value.duration || props.totalDuration
   )
 
   try {
@@ -235,7 +242,7 @@ const seekTo = (time: number) => {
   // Clamp seek time to available duration
   const clampedTime = Math.min(
     time,
-    videoPlayer.value.duration || totalDuration
+    videoPlayer.value.duration || props.totalDuration
   )
 
   try {
