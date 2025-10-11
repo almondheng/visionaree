@@ -87,18 +87,27 @@ def summarize_clip(
             f"Summarizing segment {start_time} for job {job_id} from {input_source} (format: {video_format})"
         )
 
-        if include_threat_assessment:
-            system_msgs = [
-                {
-                    "text": "You are an expert surveillance analyst with specialized knowledge in security assessment and threat detection. Analyze the video content and provide both a descriptive caption and a threat level assessment. "
-                }
-            ]
-        else:
-            system_msgs = [
-                {
-                    "text": "You are an expert surveillance camera captioner. Output only one concise, descriptive caption in plain text. DO NOT include duration, explanations or extra formatting."
-                }
-            ]
+        system_msgs = [
+            {
+                "text": (
+                    """
+                    You are an expert video analysis assistant specialized in interpreting surveillance footage.
+                    Your goal is to describe only meaningful or new events from each segment accurately and concisely.
+
+                    Follow these principles:
+                    - Focus on observable facts — never speculate about motives, identities, or unseen causes.
+                    - Summarize visually evident actions in one short, neutral sentence.
+                    - Ignore static background, lighting changes, or minor motion unless relevant to the event.
+                    - If nothing important happens, return an empty string.
+                    - Maintain concise, objective, and factual language — avoid adjectives or emotional tone.
+                    - When asked for a threat assessment, assign a threat level (low, medium, high) based only on visible evidence of activity severity.
+
+                    Always comply with the output format specified in the user prompt.
+                    Never include reasoning, metadata, or extra commentary.
+                    """
+                )
+            }
+        ]
 
         message_list = [
             {
