@@ -1,7 +1,6 @@
 import boto3
 import json
 import logging
-import os
 from typing import Dict, Any
 
 # Configure logging
@@ -12,103 +11,6 @@ bedrock_client = boto3.client("bedrock-runtime", region_name="us-east-1")
 
 # Bedrock model configuration
 MODEL_ID = "us.amazon.nova-pro-v1:0"
-
-# Heuristic adjustment toggle (env override)
-USE_THREAT_HEURISTIC = os.getenv("USE_THREAT_HEURISTIC", "true").lower() in {
-    "1",
-    "true",
-    "yes",
-    "on",
-}
-
-
-def _heuristic_adjust_threat(caption: str, model_level: str) -> str:
-    """Lightweight keyword + pattern heuristic to improve consistency.
-
-    Escalates or de-escalates only when clear mismatch. Always returns one of low|medium|high.
-    """
-    if not caption:
-        return "low"
-
-    text = caption.lower()
-
-    high_keywords = [
-        "gun",
-        "knife",
-        "weapon",
-        "fire",
-        "explosion",
-        "fight",
-        "punch",
-        "kicking",
-        "breaking",
-        "smashing",
-        "vandal",
-        "assault",
-    ]
-    medium_keywords = [
-        "argue",
-        "arguing",
-        "confront",
-        "confrontation",
-        "loiter",
-        "tamper",
-        "tampering",
-        "door handle",
-        "trying door",
-        "suspicious",
-        "climb",
-        "climbing",
-        "trespass",
-        "trespassing",
-        "unauthorized",
-    ]
-    benign_keywords = [
-        "walking",
-        "stands",
-        "standing",
-        "sitting",
-        "talking",
-        "idle",
-        "nothing",
-        "empty",
-    ]
-
-    def contains_any(words):
-        return any(w in text for w in words)
-
-    # Direct high signals
-    if contains_any(high_keywords):
-        desired = "high"
-    elif contains_any(medium_keywords):
-        desired = "medium"
-    elif contains_any(benign_keywords):
-        desired = "low"
-    else:
-        desired = model_level or "low"
-
-    # De-escalate if caption explicitly indicates nothing happening
-    if (
-        any(
-            p in text
-            for p in ["no activity", "nothing happens", "no one", "empty scene"]
-        )
-        and desired != "low"
-    ):
-        desired = "low"
-
-    # If model gave high but we have only benign keywords
-    if (
-        model_level == "high"
-        and contains_any(benign_keywords)
-        and not contains_any(high_keywords + medium_keywords)
-    ):
-        desired = "low"
-
-    # Ensure valid
-    if desired not in {"low", "medium", "high"}:
-        desired = "low"
-    return desired
 
 
 def summarize_clip(
@@ -314,14 +216,7 @@ def summarize_clip(
             },
         }
         if include_threat_assessment:
-            adjusted_level = threat_level
-            if USE_THREAT_HEURISTIC:
-                adjusted_level = _heuristic_adjust_threat(caption, threat_level)
-                if adjusted_level != threat_level:
-                    logger.warning(
-                        f"Threat heuristic adjusted level from {threat_level} -> {adjusted_level} (job={job_id}, segment={start_time})"
-                    )
-            result["threat_level"] = adjusted_level
+            result["threat_level"] = threat_level
         return result
 
     except Exception as e:
