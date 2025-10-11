@@ -61,10 +61,11 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Handle different input formats
         video_data = None
         original_filename = None
+        user_prompt = None
         
         if content_type.startswith('multipart/form-data'):
             # Parse multipart form data
-            video_data, original_filename = parse_multipart_video(body, content_type)
+            video_data, original_filename, user_prompt = parse_multipart_video(body, content_type)
         elif (content_type.startswith('video/') or 
               content_type.startswith('application/octet-stream') or
               content_type in ['video/mp4', 'video/quicktime', 'video/x-matroska', 
@@ -89,7 +90,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 default_filename = content_type_to_extension.get(content_type, 'video.mp4')
             
             original_filename = default_filename
-            logger.info(f"Binary upload detected: content-type={content_type}, filename={original_filename}")
+            # For binary uploads, check for user_prompt in headers
+            user_prompt = headers.get('x-user-prompt')
+            logger.info(f"Binary upload detected: content-type={content_type}, filename={original_filename}, user_prompt={user_prompt}")
         else:
             return create_error_response(400, f"Unsupported content type: {content_type}. Please use multipart/form-data or a supported video MIME type.")
         
@@ -110,7 +113,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         
         # Process the video and run Bedrock inference
         video_format = format_validation.get('format', '.mp4').lstrip('.')  # Remove leading dot
-        inference_result = process_video_for_inference(video_data, original_filename, video_format)
+        inference_result = process_video_for_inference(video_data, original_filename, video_format, user_prompt)
         
         return {
             'statusCode': 200,
@@ -128,16 +131,16 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         return create_error_response(500, f"Internal server error: {str(e)}")
 
 
-def parse_multipart_video(body_bytes: bytes, content_type: str) -> tuple[Optional[bytes], Optional[str]]:
+def parse_multipart_video(body_bytes: bytes, content_type: str) -> tuple[Optional[bytes], Optional[str], Optional[str]]:
     """
-    Parse multipart/form-data to extract video file.
+    Parse multipart/form-data to extract video file and optional user prompt.
     
     Args:
         body_bytes: Raw request body bytes
         content_type: Content-Type header value
         
     Returns:
-        Tuple of (video_data, filename) or (None, None) if not found
+        Tuple of (video_data, filename, user_prompt) or (None, None, None) if not found
     """
     try:
         # Extract boundary from content-type
@@ -147,53 +150,74 @@ def parse_multipart_video(body_bytes: bytes, content_type: str) -> tuple[Optiona
         
         if not boundary:
             logger.error("No boundary found in multipart content-type")
-            return None, None
+            return None, None, None
         
         boundary_bytes = f'--{boundary}'.encode()
         
         # Split by boundary
         parts = body_bytes.split(boundary_bytes)
         
-        for part in parts:
-            if b'Content-Disposition:' in part and b'filename=' in part:
-                # Found a file part
-                try:
-                    # Extract filename
-                    filename = None
-                    lines = part.split(b'\r\n')
-                    for line in lines:
-                        if b'Content-Disposition:' in line and b'filename=' in line:
-                            # Parse filename from Content-Disposition header
-                            line_str = line.decode('utf-8', errors='ignore')
-                            if 'filename="' in line_str:
-                                filename = line_str.split('filename="')[1].split('"')[0]
-                            elif 'filename=' in line_str:
-                                filename = line_str.split('filename=')[1].split(';')[0].split(' ')[0]
-                            break
-                    
-                    # Extract file data (after double CRLF)
-                    if b'\r\n\r\n' in part:
-                        file_data = part.split(b'\r\n\r\n', 1)[1]
-                        # Remove trailing boundary markers
-                        if file_data.endswith(b'\r\n'):
-                            file_data = file_data[:-2]
-                        
-                        logger.info(f"Found video file: {filename}, size: {len(file_data)} bytes")
-                        return file_data, filename
-                        
-                except Exception as e:
-                    logger.error(f"Error parsing multipart file: {str(e)}")
-                    continue
+        video_data = None
+        filename = None
+        user_prompt = None
         
-        logger.error("No video file found in multipart data")
-        return None, None
+        for part in parts:
+            if b'Content-Disposition:' not in part:
+                continue
+                
+            # Parse Content-Disposition header
+            lines = part.split(b'\r\n')
+            content_disposition = None
+            for line in lines:
+                if b'Content-Disposition:' in line:
+                    content_disposition = line.decode('utf-8', errors='ignore')
+                    break
+            
+            if not content_disposition:
+                continue
+            
+            # Extract field name
+            field_name = None
+            if 'name="' in content_disposition:
+                field_name = content_disposition.split('name="')[1].split('"')[0]
+            elif 'name=' in content_disposition:
+                field_name = content_disposition.split('name=')[1].split(';')[0].split(' ')[0]
+            
+            # Extract field data (after double CRLF)
+            if b'\r\n\r\n' in part:
+                field_data = part.split(b'\r\n\r\n', 1)[1]
+                # Remove trailing boundary markers
+                if field_data.endswith(b'\r\n'):
+                    field_data = field_data[:-2]
+                
+                if field_name == 'video' and b'filename=' in content_disposition.encode():
+                    # This is the video file
+                    # Extract filename
+                    if 'filename="' in content_disposition:
+                        filename = content_disposition.split('filename="')[1].split('"')[0]
+                    elif 'filename=' in content_disposition:
+                        filename = content_disposition.split('filename=')[1].split(';')[0].split(' ')[0]
+                    
+                    video_data = field_data
+                    logger.info(f"Found video file: {filename}, size: {len(field_data)} bytes")
+                
+                elif field_name == 'user_prompt':
+                    # This is the user prompt text field
+                    user_prompt = field_data.decode('utf-8', errors='ignore').strip()
+                    logger.info(f"Found user prompt: {user_prompt}")
+        
+        if video_data is None:
+            logger.error("No video file found in multipart data")
+            return None, None, None
+        
+        return video_data, filename, user_prompt
         
     except Exception as e:
         logger.error(f"Error parsing multipart data: {str(e)}")
-        return None, None
+        return None, None, None
 
 
-def process_video_for_inference(video_data: bytes, filename: str, video_format: str = 'mp4') -> Dict[str, Any]:
+def process_video_for_inference(video_data: bytes, filename: str, video_format: str = 'mp4', user_prompt: str = None) -> Dict[str, Any]:
     """
     Process video data and run Bedrock inference.
     
@@ -201,6 +225,7 @@ def process_video_for_inference(video_data: bytes, filename: str, video_format: 
         video_data: Raw video file bytes
         filename: Original filename
         video_format: Video format (e.g., 'mp4', 'webm', 'mov')
+        user_prompt: Optional custom prompt from user to guide the analysis
         
     Returns:
         Dict containing inference results
@@ -230,7 +255,8 @@ def process_video_for_inference(video_data: bytes, filename: str, video_format: 
                 start_time=0,
                 video_format=video_format,
                 video_base64=video_base64,
-                include_threat_assessment=True
+                include_threat_assessment=True,
+                user_prompt=user_prompt
             )
             
             # Prepare clean response with only essential data
@@ -239,7 +265,8 @@ def process_video_for_inference(video_data: bytes, filename: str, video_format: 
                 'file_size': video_info.get('file_size', 0),
                 'caption': inference_result.get('caption'),
                 'threat_level': inference_result.get('threat_level', 'low'),
-                'status': inference_result.get('status')
+                'status': inference_result.get('status'),
+                'token_usage': inference_result.get('token_usage', {})
             }
             
             # Only include error if there was one

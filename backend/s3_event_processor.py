@@ -999,10 +999,12 @@ def summarize_video_segments(job_id: str, uploaded_segments: List[str], segment_
                     if result["status"] == "success":
                         logger.info(f"✓ Summarized segment {result['start_time']}: {result['caption']}")
                         # Print detailed inference result
+                        token_usage = result.get('token_usage', {})
                         print(f"🔍 BEDROCK INFERENCE RESULT - Segment {result['start_time']}s:")
                         print(f"   Job ID: {result['job_id']}")
                         print(f"   Caption: {result['caption']}")
                         print(f"   Status: {result['status']}")
+                        print(f"   Tokens: {token_usage.get('input_tokens', 0)} input + {token_usage.get('output_tokens', 0)} output = {token_usage.get('total_tokens', 0)} total")
                         print("---")
                     else:
                         logger.error(f"✗ Failed to summarize segment {result['start_time']}: {result.get('error', 'Unknown error')}")

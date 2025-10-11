@@ -277,6 +277,10 @@ Content-Disposition: form-data; name="video"; filename="clip.mp4"
 Content-Type: video/mp4
 
 [binary video data]
+------WebKitFormBoundary...
+Content-Disposition: form-data; name="user_prompt"
+
+Look for any suspicious activities or security concerns in this video
 ------WebKitFormBoundary...--
 ```
 
@@ -285,6 +289,7 @@ Content-Type: video/mp4
 POST /prod/video/analyze-direct
 Content-Type: video/mp4
 X-Filename: clip.mp4
+X-User-Prompt: Look for any suspicious activities or security concerns in this video
 
 [binary video data]
 ```
@@ -295,6 +300,7 @@ X-Filename: clip.mp4
 - **Supported Formats**: MP4, MOV, MKV, WebM, AVI, FLV, MPEG, MPG, TS (supported by Bedrock Nova)
 - **Processing**: Videos are used directly without re-encoding for faster response times
 - **Bedrock Compatibility**: All supported formats are natively accepted by Bedrock Nova model
+- **Custom Prompts**: Optional user_prompt field allows custom analysis requests (200 character limit)
 
 ### Response Format
 
@@ -305,7 +311,12 @@ X-Filename: clip.mp4
   "file_size": 2048576,
   "caption": "A person walks across a parking lot carrying a red backpack during daylight hours.",
   "threat_level": "low",
-  "status": "success"
+  "status": "success",
+  "token_usage": {
+    "input_tokens": 1847,
+    "output_tokens": 23,
+    "total_tokens": 1870
+  }
 }
 ```
 
@@ -318,6 +329,10 @@ X-Filename: clip.mp4
   - **MEDIUM**: Unusual activities, policy violations, maintenance issues, crowd gatherings  
   - **LOW**: Normal activities, routine observations
 - `status`: Processing status (typically "success" for 200 responses)
+- `token_usage`: Bedrock Nova Pro model token consumption metrics
+  - `input_tokens`: Tokens used for input (video + text prompt)
+  - `output_tokens`: Tokens generated in response
+  - `total_tokens`: Sum of input and output tokens
 
 
 

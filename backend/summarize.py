@@ -14,7 +14,7 @@ MODEL_ID = "us.amazon.nova-pro-v1:0"
 
 
 def summarize_clip(
-    s3_uri: str = None, job_id: str = None, start_time: int = None, video_format: str = None, video_base64: str = None, include_threat_assessment: bool = False
+    s3_uri: str = None, job_id: str = None, start_time: int = None, video_format: str = None, video_base64: str = None, include_threat_assessment: bool = False, user_prompt: str = None
 ) -> Dict[str, Any]:
     """
     Summarize a video segment using Amazon Bedrock Nova.
@@ -26,6 +26,7 @@ def summarize_clip(
         video_format: Video format (e.g., 'mp4', 'webm', 'mov'). If None, will auto-detect from URI extension
         video_base64: Base64 encoded video data (alternative to s3_uri for direct processing)
         include_threat_assessment: If True, includes threat level assessment in the response
+        user_prompt: Optional custom prompt from user to guide the analysis
 
     Returns:
         Dict containing caption, status information, and optionally threat level
@@ -107,17 +108,21 @@ def summarize_clip(
                     },
                     {
                         "text": (
-                            "Summarize this segment of a full video in one sentence. "
-                            "Focus only on new or important events. "
-                            "Ignore background or static details unless they change. "
-                            "If suspicious or unusual activities occur, describe the observation without assumption. "
-                            "If nothing significant happens, return empty string. "
-                            + ("Return only the caption, no extra text." if not include_threat_assessment else 
-                               "Also assess the threat level based on these criteria:\n"
-                               "- HIGH: Immediate security concerns, suspicious behavior, potential crimes, emergencies, unauthorized access, weapons\n"
-                               "- MEDIUM: Unusual activities, policy violations, maintenance issues, crowd gatherings\n"
-                               "- LOW: Normal activities, routine observations\n\n"
-                               "Return your response as JSON: {\"caption\": \"description\", \"threat_level\": \"low|medium|high\"}")
+                            # Base instruction
+                            ("Analyze this video according to the following user request: " + user_prompt + "\n\n" if user_prompt else
+                             "Summarize this segment of a full video in one sentence. "
+                             "Focus only on new or important events. "
+                             "Ignore background or static details unless they change. "
+                             "If suspicious or unusual activities occur, describe the observation without assumption. "
+                             "If nothing significant happens, return empty string. ")
+                            + 
+                            # Response format instruction
+                            ("Return only the caption, no extra text." if not include_threat_assessment else 
+                             "Also assess the threat level based on these criteria:\n"
+                             "- HIGH: Immediate security concerns, suspicious behavior, potential crimes, emergencies, unauthorized access, weapons\n"
+                             "- MEDIUM: Unusual activities, policy violations, maintenance issues, crowd gatherings\n"
+                             "- LOW: Normal activities, routine observations\n\n"
+                             "Return your response as JSON: {\"caption\": \"description\", \"threat_level\": \"low|medium|high\"}")
                         )
                     },
                 ],
@@ -139,14 +144,22 @@ def summarize_clip(
         body = json.loads(resp["body"].read())
         output_text = body["output"]["message"]["content"][0]["text"]
 
+        # Extract token usage information
+        usage = body.get("usage", {})
+        input_tokens = usage.get("inputTokens", 0)
+        output_tokens = usage.get("outputTokens", 0)
+        total_tokens = input_tokens + output_tokens
+
         # Print detailed Bedrock inference information
         print(f"\n🤖 BEDROCK INFERENCE - Job: {job_id}, Segment: {start_time}s")
-        print(f"📹 Video S3 URI: {s3_uri}")
+        print(f"📹 Video Source: {'S3' if s3_uri else 'Base64'}")
         print(f"🧠 Model: {MODEL_ID}")
+        print(f"🔢 Token Usage: {input_tokens} input + {output_tokens} output = {total_tokens} total")
         print(f"💭 Response: {output_text}")
         print("-" * 60)
 
         logger.info(f"Bedrock response for segment {start_time}: {output_text}")
+        logger.info(f"Token usage - Input: {input_tokens}, Output: {output_tokens}, Total: {total_tokens}")
 
         # Parse response based on whether threat assessment was requested
         if include_threat_assessment:
@@ -160,6 +173,11 @@ def summarize_clip(
                     "caption": response_data.get("caption", output_text),
                     "threat_level": response_data.get("threat_level", "low"),
                     "status": "success",
+                    "token_usage": {
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                        "total_tokens": total_tokens
+                    }
                 }
             except json_module.JSONDecodeError:
                 # Fallback if JSON parsing fails
@@ -170,6 +188,11 @@ def summarize_clip(
                     "caption": output_text,
                     "threat_level": "low",  # Default to low if parsing fails
                     "status": "success",
+                    "token_usage": {
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                        "total_tokens": total_tokens
+                    }
                 }
         else:
             return {
@@ -177,6 +200,11 @@ def summarize_clip(
                 "start_time": start_time,
                 "caption": output_text,
                 "status": "success",
+                "token_usage": {
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "total_tokens": total_tokens
+                }
             }
 
     except Exception as e:
