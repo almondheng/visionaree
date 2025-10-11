@@ -348,7 +348,7 @@ You are analyzing segments from surveillance video footage. Each segment contain
 - Highlight any security implications or recommendations
 - Note any data limitations or gaps in coverage
 - Use clear, professional language suitable for security personnel
-- DO NOT mention the segment_id
+- DO NOT talk about segment
 
 ## Response Format
 Return ONLY a valid JSON object with this exact structure:
@@ -361,14 +361,7 @@ Return ONLY a valid JSON object with this exact structure:
         }
     ],
     "insights": "<detailed summary of findings, patterns, and security implications>"
-}
-
-## Quality Standards
-- Be selective: quality over quantity in segment selection
-- Provide specific, actionable relevance reasons
-- Ensure insights add value beyond just listing segment contents
-- Maintain consistency in threat level assessment
-- Handle edge cases gracefully (no segments, unclear queries, etc.)"""
+}"""
 
 
 def filter_segments_with_nova_pro(
