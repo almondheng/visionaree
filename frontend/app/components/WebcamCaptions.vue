@@ -103,7 +103,25 @@
         </div>
       </ScrollArea>
     </CardContent>
-    <CardFooter class="p-4 border-t">
+    <CardFooter class="flex flex-col p-4 border-t">
+      <!-- User Prompt Input -->
+      <div class="mb-3 w-full">
+        <label
+          for="user-prompt"
+          class="text-sm font-medium text-foreground mb-2 block"
+        >
+          Analysis Prompt
+        </label>
+        <Input
+          id="user-prompt"
+          v-model="userPrompt"
+          placeholder="Enter custom analysis prompt (e.g., 'Focus on safety hazards')"
+          class="text-sm"
+          @keydown.enter="onPromptSubmit"
+        />
+      </div>
+
+      <!-- Existing Controls -->
       <div class="flex items-center justify-between w-full">
         <div class="flex items-center space-x-3">
           <Switch id="hide-low-threat" v-model="hideLowThreatCaptions" />
@@ -123,13 +141,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, watch, ref } from 'vue'
+import { computed, watch, ref, onMounted } from 'vue'
 import { toast } from 'vue-sonner'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { ChatHeader } from '@/components/ui/chat'
 import { Card, CardContent, CardFooter } from '@/components/ui/card'
 import { Switch } from '@/components/ui/switch'
+import { Input } from '@/components/ui/input'
 import { formatTimestamp, formatAbsoluteTimestamp } from '@/lib/utils'
 
 interface CaptionItem {
@@ -155,10 +174,29 @@ const props = defineProps<Props>()
 
 const emit = defineEmits<{
   'seek-to-timestamp': [timestamp: number]
+  'user-prompt-change': [prompt: string]
 }>()
 
 // Toggle for hiding low threat captions (default: true)
 const hideLowThreatCaptions = ref<boolean>(true)
+
+// User prompt for analysis
+const userPrompt = ref<string>('')
+const lastSubmittedPrompt = ref<string>('')
+
+// Function to handle prompt submission on Enter key
+const onPromptSubmit = () => {
+  const trimmedPrompt = userPrompt.value.trim()
+  if (trimmedPrompt !== lastSubmittedPrompt.value) {
+    lastSubmittedPrompt.value = trimmedPrompt
+    emit('user-prompt-change', trimmedPrompt)
+  }
+}
+
+// Emit initial empty prompt on mount
+onMounted(() => {
+  emit('user-prompt-change', '')
+})
 
 const sortedCaptions = computed(() => {
   let filtered = [...props.captions].filter(

@@ -181,6 +181,10 @@ watch(showRecording, newValue => {
   }
 })
 
+const setUserPrompt = (prompt: string) => {
+  recorder.setUserPrompt(prompt)
+}
+
 const seekTo = (time: number) => {
   recordingPlayerRef.value?.seekTo(time)
 }
@@ -295,5 +299,6 @@ defineExpose({
   seekTo,
   seekToTimestamp,
   cameraSettings,
+  setUserPrompt,
 })
 </script>

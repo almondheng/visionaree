@@ -353,13 +353,17 @@ interface VideoAnalysisResponse {
 
 export async function analyzeVideoChunk(
   videoBlob: Blob,
-  filename: string
+  filename: string,
+  userPrompt: string = ''
 ): Promise<VideoAnalysisResponse> {
   const formData = new FormData()
   formData.append('video', videoBlob, filename)
 
   const response = await fetch(`${API_BASE_URL}/video/analyze-direct`, {
     method: 'POST',
+    headers: {
+      'x-user-prompt': userPrompt,
+    },
     body: formData,
   })
 

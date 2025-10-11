@@ -26,6 +26,7 @@ export class WebcamRecorder {
   private currentStream: MediaStream | null = null
   private dbInitialized = false
   private selectedMimeType = 'video/webm'
+  private userPrompt = ''
 
   async startRecording(stream: MediaStream) {
     await this.loadFromIndexedDB()
@@ -142,6 +143,10 @@ export class WebcamRecorder {
     this.chunks.splice(0, this.chunks.length)
     this.currentChunkStartTime = 0
     this.recordingStartTime = 0
+  }
+
+  setUserPrompt(prompt: string) {
+    this.userPrompt = prompt
   }
 
   private startNewSegment() {
@@ -262,7 +267,11 @@ export class WebcamRecorder {
       const filename = `chunk-${chunk.timestamp}.webm`
 
       // Call the inference API
-      const response = await analyzeVideoChunk(chunk.blob, filename)
+      const response = await analyzeVideoChunk(
+        chunk.blob,
+        filename,
+        this.userPrompt
+      )
 
       if (response.success) {
         // Update chunk with caption directly in the reactive array

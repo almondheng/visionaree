@@ -38,6 +38,7 @@
               :captions="webcamCaptions"
               :processing-status="webcamProcessingStatus"
               @seek-to-timestamp="seekToTimestamp"
+              @user-prompt-change="handleUserPromptChange"
             />
           </ClientOnly>
         </div>
@@ -149,6 +150,10 @@ const stopCamera = () => {
 
 const seekToTimestamp = async (timestamp: number) => {
   await webcamPlayerRef.value?.seekToTimestamp(timestamp)
+}
+
+const handleUserPromptChange = (prompt: string) => {
+  webcamPlayerRef.value?.setUserPrompt(prompt)
 }
 
 onMounted(() => {
