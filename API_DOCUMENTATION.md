@@ -302,12 +302,22 @@ X-Filename: clip.mp4
 ```json
 {
   "success": true,
-  "filename": "clip.mp4",
   "file_size": 2048576,
   "caption": "A person walks across a parking lot carrying a red backpack during daylight hours.",
+  "threat_level": "low",
   "status": "success"
 }
 ```
+
+**Response Fields:**
+- `success`: Boolean indicating if the analysis was successful
+- `file_size`: Size of the uploaded video file in bytes
+- `caption`: AI-generated description of the video content
+- `threat_level`: Security threat assessment (`low`, `medium`, or `high`)
+  - **HIGH**: Immediate security concerns, suspicious behavior, potential crimes, emergencies, unauthorized access
+  - **MEDIUM**: Unusual activities, policy violations, maintenance issues, crowd gatherings  
+  - **LOW**: Normal activities, routine observations
+- `status`: Processing status (typically "success" for 200 responses)
 
 
 

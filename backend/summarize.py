@@ -14,7 +14,7 @@ MODEL_ID = "us.amazon.nova-pro-v1:0"
 
 
 def summarize_clip(
-    s3_uri: str = None, job_id: str = None, start_time: int = None, video_format: str = None, video_base64: str = None
+    s3_uri: str = None, job_id: str = None, start_time: int = None, video_format: str = None, video_base64: str = None, include_threat_assessment: bool = False
 ) -> Dict[str, Any]:
     """
     Summarize a video segment using Amazon Bedrock Nova.
@@ -25,9 +25,10 @@ def summarize_clip(
         start_time: Start time of the segment in seconds (optional, for logging/tracking purposes)
         video_format: Video format (e.g., 'mp4', 'webm', 'mov'). If None, will auto-detect from URI extension
         video_base64: Base64 encoded video data (alternative to s3_uri for direct processing)
+        include_threat_assessment: If True, includes threat level assessment in the response
 
     Returns:
-        Dict containing caption and status information
+        Dict containing caption, status information, and optionally threat level
     """
     try:
         # Extract identifiers from s3_uri if not provided
@@ -75,11 +76,18 @@ def summarize_clip(
         input_source = "base64 data" if video_base64 else s3_uri
         logger.info(f"Summarizing segment {start_time} for job {job_id} from {input_source} (format: {video_format})")
 
-        system_msgs = [
-            {
-                "text": "You are an expert surveillance camera captioner. Output only one concise, descriptive caption in plain text. DO NOT include duration, explanations or extra formatting."
-            }
-        ]
+        if include_threat_assessment:
+            system_msgs = [
+                {
+                    "text": "You are an expert surveillance analyst with specialized knowledge in security assessment and threat detection. Analyze the video content and provide both a descriptive caption and a threat level assessment."
+                }
+            ]
+        else:
+            system_msgs = [
+                {
+                    "text": "You are an expert surveillance camera captioner. Output only one concise, descriptive caption in plain text. DO NOT include duration, explanations or extra formatting."
+                }
+            ]
 
         message_list = [
             {
@@ -104,7 +112,12 @@ def summarize_clip(
                             "Ignore background or static details unless they change. "
                             "If suspicious or unusual activities occur, describe the observation without assumption. "
                             "If nothing significant happens, return empty string. "
-                            "Return only the caption, no extra text."
+                            + ("Return only the caption, no extra text." if not include_threat_assessment else 
+                               "Also assess the threat level based on these criteria:\n"
+                               "- HIGH: Immediate security concerns, suspicious behavior, potential crimes, emergencies, unauthorized access, weapons\n"
+                               "- MEDIUM: Unusual activities, policy violations, maintenance issues, crowd gatherings\n"
+                               "- LOW: Normal activities, routine observations\n\n"
+                               "Return your response as JSON: {\"caption\": \"description\", \"threat_level\": \"low|medium|high\"}")
                         )
                     },
                 ],
@@ -135,12 +148,36 @@ def summarize_clip(
 
         logger.info(f"Bedrock response for segment {start_time}: {output_text}")
 
-        return {
-            "job_id": job_id,
-            "start_time": start_time,
-            "caption": output_text,
-            "status": "success",
-        }
+        # Parse response based on whether threat assessment was requested
+        if include_threat_assessment:
+            try:
+                # Try to parse JSON response
+                import json as json_module
+                response_data = json_module.loads(output_text.strip())
+                return {
+                    "job_id": job_id,
+                    "start_time": start_time,
+                    "caption": response_data.get("caption", output_text),
+                    "threat_level": response_data.get("threat_level", "low"),
+                    "status": "success",
+                }
+            except json_module.JSONDecodeError:
+                # Fallback if JSON parsing fails
+                logger.warning(f"Failed to parse threat assessment JSON, using text response: {output_text}")
+                return {
+                    "job_id": job_id,
+                    "start_time": start_time,
+                    "caption": output_text,
+                    "threat_level": "low",  # Default to low if parsing fails
+                    "status": "success",
+                }
+        else:
+            return {
+                "job_id": job_id,
+                "start_time": start_time,
+                "caption": output_text,
+                "status": "success",
+            }
 
     except Exception as e:
         logger.error(f"Error summarizing segment {start_time}: {str(e)}")

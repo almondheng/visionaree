@@ -229,7 +229,8 @@ def process_video_for_inference(video_data: bytes, filename: str, video_format: 
                 job_id="direct-inference",
                 start_time=0,
                 video_format=video_format,
-                video_base64=video_base64
+                video_base64=video_base64,
+                include_threat_assessment=True
             )
             
             # Prepare clean response with only essential data
@@ -237,6 +238,7 @@ def process_video_for_inference(video_data: bytes, filename: str, video_format: 
                 'success': True,
                 'file_size': video_info.get('file_size', 0),
                 'caption': inference_result.get('caption'),
+                'threat_level': inference_result.get('threat_level', 'low'),
                 'status': inference_result.get('status')
             }
             
