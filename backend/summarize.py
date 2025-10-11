@@ -129,28 +129,30 @@ def summarize_clip(
                     },
                     {
                         "text": (
-                            # Base instruction - always include the original analysis prompt
-                            "Summarize this segment of a full video in one sentence. "
-                            "Focus only on new or important events. "
-                            "Ignore background or static details unless they change. "
-                            "If suspicious or unusual activities occur, describe the observation without assumption. "
-                            "If nothing significant happens, return empty string. " +
-                            # Add user's custom request if provided
+                            # Include user-provided context if available
                             (
-                                f"\n\nAdditionally, please address this specific user request: {user_prompt}"
+                                f"Context: {user_prompt.strip()}\n\n"
                                 if user_prompt
                                 else ""
                             )
                             +
+                            # Base instruction - always include the original analysis prompt
+                            "You are analyzing a short segment from a surveillance video. "
+                            "Summarize what happens in this segment in **one concise sentence**. "
+                            "Focus only on new or meaningful events. "
+                            "Ignore static or repetitive background unless it changes or becomes relevant. "
+                            "If any suspicious or unusual behavior is observed, describe it **factually** without assumptions. "
+                            "If nothing noteworthy occurs, return an empty string. " +
                             # Simple response format instruction based on mode
                             (
-                                "\n\nReturn only the caption, no extra text."
+                                "\n\nReturn only the caption, with no extra explanation or formatting."
                                 if not include_threat_assessment
-                                else "Assess the threat level based on these criteria:\n"
-                                "- HIGH: Immediate security concerns, suspicious behavior, potential crimes, emergencies, unauthorized access, weapons\n"
-                                "- MEDIUM: Unusual activities, policy violations, maintenance issues, crowd gatherings\n"
-                                "- LOW: Normal activities, routine observations\n\n"
-                                'Return your response as JSON: {"caption": "description", "threat_level": "low|medium|high"}'
+                                else "\n\nIn addition, assess the threat level based on these definitions:\n"
+                                "- HIGH: Immediate security concern, suspicious or dangerous behavior, potential crime, emergencies, unauthorized access, visible weapons\n"
+                                "- MEDIUM: Unusual activities, policy violation, maintenance issue, or small crowd gathering\n"
+                                "- LOW: Normal or routine activity\n\n"
+                                "Respond in JSON format as:\n"
+                                '{"caption": "one-sentence description", "threat_level": "low|medium|high"}'
                             )
                         )
                     },
