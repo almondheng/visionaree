@@ -77,7 +77,7 @@
                       : 'bg-yellow-500'
                   "
                 >
-                  {{ formatTimestamp(caption.startTime) }}
+                  {{ formatAbsoluteTimestamp(caption.timestamp) }}
                 </Badge>
               </div>
               <div class="flex-1 min-w-0">
@@ -109,7 +109,7 @@ import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { ChatHeader } from '@/components/ui/chat'
 import { Card, CardContent } from '@/components/ui/card'
-import { formatTimestamp } from '@/lib/utils'
+import { formatTimestamp, formatAbsoluteTimestamp } from '@/lib/utils'
 
 interface CaptionItem {
   timestamp: number
