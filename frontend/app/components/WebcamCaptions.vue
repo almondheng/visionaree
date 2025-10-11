@@ -21,7 +21,7 @@
     </ChatHeader>
 
     <!-- Captions Area -->
-    <CardContent class="flex-1 flex flex-col min-h-0 p-0 pb-4">
+    <CardContent class="flex-1 flex flex-col min-h-0 p-0">
       <ScrollArea class="flex-1 p-4 min-h-0">
         <!-- Empty State -->
         <div
@@ -47,9 +47,13 @@
                 />
               </svg>
             </div>
-            <h4 class="font-medium text-sm mb-2">No notable captions yet</h4>
+            <h4 class="font-medium text-sm mb-2">No captions yet</h4>
             <p class="text-xs text-muted-foreground">
-              Only medium and high-threat content will appear here
+              {{
+                hideLowThreatCaptions
+                  ? 'Only medium and high-threat content will appear here'
+                  : 'Captions from video analysis will appear here'
+              }}
             </p>
           </div>
         </div>
@@ -74,7 +78,7 @@
                       ? ''
                       : caption.threat_level === 'medium'
                       ? 'bg-amber-500'
-                      : 'bg-yellow-500'
+                      : 'bg-slate-300'
                   "
                 >
                   {{ formatAbsoluteTimestamp(caption.timestamp) }}
@@ -99,16 +103,33 @@
         </div>
       </ScrollArea>
     </CardContent>
+    <CardFooter class="p-4 border-t">
+      <div class="flex items-center justify-between w-full">
+        <div class="flex items-center space-x-3">
+          <Switch id="hide-low-threat" v-model="hideLowThreatCaptions" />
+          <label
+            for="hide-low-threat"
+            class="text-sm font-medium text-foreground cursor-pointer"
+          >
+            Hide low threat captions
+          </label>
+        </div>
+        <Badge variant="outline" class="text-xs">
+          {{ filteredCaptionsCount }} shown
+        </Badge>
+      </div>
+    </CardFooter>
   </Card>
 </template>
 
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, watch, ref } from 'vue'
 import { toast } from 'vue-sonner'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { ChatHeader } from '@/components/ui/chat'
-import { Card, CardContent } from '@/components/ui/card'
+import { Card, CardContent, CardFooter } from '@/components/ui/card'
+import { Switch } from '@/components/ui/switch'
 import { formatTimestamp, formatAbsoluteTimestamp } from '@/lib/utils'
 
 interface CaptionItem {
@@ -136,15 +157,26 @@ const emit = defineEmits<{
   'seek-to-timestamp': [timestamp: number]
 }>()
 
+// Toggle for hiding low threat captions (default: true)
+const hideLowThreatCaptions = ref<boolean>(true)
+
 const sortedCaptions = computed(() => {
-  return [...props.captions]
-    .filter(caption => caption.caption || caption.captionError)
-    .filter(
+  let filtered = [...props.captions].filter(
+    caption => caption.caption || caption.captionError
+  )
+
+  // Apply low threat filter if toggle is enabled
+  if (hideLowThreatCaptions.value) {
+    filtered = filtered.filter(
       caption =>
         caption.threat_level === 'medium' || caption.threat_level === 'high'
     )
-    .reverse()
+  }
+
+  return filtered.reverse()
 })
+
+const filteredCaptionsCount = computed(() => sortedCaptions.value.length)
 
 // Watch for new high threat level captions and show toast
 let previousHighThreatCount = 0
