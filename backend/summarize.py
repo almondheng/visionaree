@@ -212,6 +212,7 @@ def summarize_clip(
         }
         if include_threat_assessment:
             result["threat_level"] = threat_level
+            result["safe_user_context"] = safe_user_context
         return result
 
     except Exception as e:
