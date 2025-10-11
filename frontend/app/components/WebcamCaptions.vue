@@ -103,7 +103,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
+import { toast } from 'vue-sonner'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { ChatHeader } from '@/components/ui/chat'
@@ -144,4 +145,29 @@ const sortedCaptions = computed(() => {
     )
     .reverse()
 })
+
+// Watch for new high threat level captions and show toast
+let previousHighThreatCount = 0
+watch(
+  () => props.captions,
+  newCaptions => {
+    const highThreatCaptions = newCaptions.filter(
+      caption => caption.threat_level === 'high' && caption.caption
+    )
+
+    // Only show toast if we have new high threat captions
+    if (highThreatCaptions.length > previousHighThreatCount) {
+      const newHighThreatCount =
+        highThreatCaptions.length - previousHighThreatCount
+      toast.warning('High Risk Alert', {
+        description:
+          'Review the flagged timestamps for potential security concerns.',
+        duration: 6000,
+      })
+    }
+
+    previousHighThreatCount = highThreatCaptions.length
+  },
+  { deep: true }
+)
 </script>
