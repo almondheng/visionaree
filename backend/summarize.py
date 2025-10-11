@@ -80,7 +80,8 @@ def summarize_clip(
         if include_threat_assessment:
             system_msgs = [
                 {
-                    "text": "You are an expert surveillance analyst with specialized knowledge in security assessment and threat detection. Analyze the video content and provide both a descriptive caption and a threat level assessment."
+                    "text": "You are an expert surveillance analyst with specialized knowledge in security assessment and threat detection. Analyze the video content and provide both a descriptive caption and a threat level assessment. "
+
                 }
             ]
         else:
@@ -108,21 +109,22 @@ def summarize_clip(
                     },
                     {
                         "text": (
-                            # Base instruction
-                            ("Analyze this video according to the following user request: " + user_prompt + "\n\n" if user_prompt else
-                             "Summarize this segment of a full video in one sentence. "
-                             "Focus only on new or important events. "
-                             "Ignore background or static details unless they change. "
-                             "If suspicious or unusual activities occur, describe the observation without assumption. "
-                             "If nothing significant happens, return empty string. ")
+                            # Base instruction - always include the original analysis prompt
+                            "Summarize this segment of a full video in one sentence. "
+                            "Focus only on new or important events. "
+                            "Ignore background or static details unless they change. "
+                            "If suspicious or unusual activities occur, describe the observation without assumption. "
+                            "If nothing significant happens, return empty string. "
                             + 
-                            # Response format instruction
-                            ("Return only the caption, no extra text." if not include_threat_assessment else 
-                             "Also assess the threat level based on these criteria:\n"
-                             "- HIGH: Immediate security concerns, suspicious behavior, potential crimes, emergencies, unauthorized access, weapons\n"
-                             "- MEDIUM: Unusual activities, policy violations, maintenance issues, crowd gatherings\n"
-                             "- LOW: Normal activities, routine observations\n\n"
-                             "Return your response as JSON: {\"caption\": \"description\", \"threat_level\": \"low|medium|high\"}")
+                            # Add user's custom request if provided
+                            (f"\n\nAdditionally, please address this specific user request: {user_prompt}" if user_prompt else "")
+                            +
+                            # Simple response format instruction based on mode
+                            ("\n\nReturn only the caption, no extra text." if not include_threat_assessment else "Assess the threat level based on these criteria:\n"
+                            "- HIGH: Immediate security concerns, suspicious behavior, potential crimes, emergencies, unauthorized access, weapons\n"
+                            "- MEDIUM: Unusual activities, policy violations, maintenance issues, crowd gatherings\n"
+                            "- LOW: Normal activities, routine observations\n\n"
+                            "Return your response as JSON: {\"caption\": \"description\", \"threat_level\": \"low|medium|high\"}")
                         )
                     },
                 ],
