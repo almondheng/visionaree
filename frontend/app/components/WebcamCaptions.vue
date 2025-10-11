@@ -112,13 +112,43 @@
         >
           Analysis Prompt
         </label>
-        <Input
-          id="user-prompt"
-          v-model="userPrompt"
-          placeholder="Enter custom analysis prompt (e.g., 'Focus on safety hazards')"
-          class="text-sm"
-          @keydown.enter="onPromptSubmit"
-        />
+        <div class="flex gap-2">
+          <Input
+            ref="userPromptInput"
+            id="user-prompt"
+            v-model="userPrompt"
+            :placeholder="
+              isEditing
+                ? 'Enter custom analysis prompt (e.g., \'Focus on safety hazards\')'
+                : lastSubmittedPrompt || 'No prompt set'
+            "
+            :readonly="!isEditing"
+            class="text-sm flex-1 read-only:cursor-not-allowed read-only:bg-muted/50 read-only:select-none"
+            @keydown.enter="onPromptConfirm"
+          />
+          <Button
+            v-if="!isEditing"
+            @click="startEditing"
+            size="sm"
+            variant="outline"
+            class="px-3"
+          >
+            Edit
+          </Button>
+          <template v-else>
+            <Button @click="onPromptConfirm" size="sm" class="px-3">
+              Confirm
+            </Button>
+            <Button
+              @click="cancelEditing"
+              size="sm"
+              variant="outline"
+              class="px-3"
+            >
+              Cancel
+            </Button>
+          </template>
+        </div>
       </div>
 
       <!-- Existing Controls -->
@@ -141,7 +171,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, watch, ref, onMounted } from 'vue'
+import { computed, watch, ref, onMounted, nextTick } from 'vue'
 import { toast } from 'vue-sonner'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -149,6 +179,7 @@ import { ChatHeader } from '@/components/ui/chat'
 import { Card, CardContent, CardFooter } from '@/components/ui/card'
 import { Switch } from '@/components/ui/switch'
 import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
 import { formatTimestamp, formatAbsoluteTimestamp } from '@/lib/utils'
 
 interface CaptionItem {
@@ -179,18 +210,36 @@ const emit = defineEmits<{
 
 // Toggle for hiding low threat captions (default: true)
 const hideLowThreatCaptions = ref<boolean>(true)
+const userPromptInput = ref<HTMLInputElement | null>(null)
 
 // User prompt for analysis
 const userPrompt = ref<string>('')
 const lastSubmittedPrompt = ref<string>('')
+const isEditing = ref<boolean>(false)
+const originalPrompt = ref<string>('')
 
-// Function to handle prompt submission on Enter key
-const onPromptSubmit = () => {
+// Function to start editing mode
+const startEditing = async () => {
+  originalPrompt.value = userPrompt.value
+  isEditing.value = true
+  await nextTick()
+  userPromptInput.value?.focus()
+}
+
+// Function to cancel editing and restore original value
+const cancelEditing = () => {
+  userPrompt.value = originalPrompt.value
+  isEditing.value = false
+}
+
+// Function to confirm prompt changes
+const onPromptConfirm = () => {
   const trimmedPrompt = userPrompt.value.trim()
   if (trimmedPrompt !== lastSubmittedPrompt.value) {
     lastSubmittedPrompt.value = trimmedPrompt
     emit('user-prompt-change', trimmedPrompt)
   }
+  isEditing.value = false
 }
 
 // Emit initial empty prompt on mount
