@@ -334,7 +334,8 @@ export class BackendStack extends cdk.Stack {
           'Authorization',
           'X-Api-Key',
           'X-Amz-Security-Token',
-          'X-Filename'
+          'X-Filename',
+          'X-User-Prompt'
         ]
       },
       deployOptions: {
