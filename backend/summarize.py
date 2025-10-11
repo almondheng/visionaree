@@ -1,6 +1,7 @@
 import boto3
 import json
 import logging
+import os
 from typing import Dict, Any
 
 # Configure logging
@@ -11,6 +12,103 @@ bedrock_client = boto3.client("bedrock-runtime", region_name="us-east-1")
 
 # Bedrock model configuration
 MODEL_ID = "us.amazon.nova-pro-v1:0"
+
+# Heuristic adjustment toggle (env override)
+USE_THREAT_HEURISTIC = os.getenv("USE_THREAT_HEURISTIC", "true").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+
+
+def _heuristic_adjust_threat(caption: str, model_level: str) -> str:
+    """Lightweight keyword + pattern heuristic to improve consistency.
+
+    Escalates or de-escalates only when clear mismatch. Always returns one of low|medium|high.
+    """
+    if not caption:
+        return "low"
+
+    text = caption.lower()
+
+    high_keywords = [
+        "gun",
+        "knife",
+        "weapon",
+        "fire",
+        "explosion",
+        "fight",
+        "punch",
+        "kicking",
+        "breaking",
+        "smashing",
+        "vandal",
+        "assault",
+    ]
+    medium_keywords = [
+        "argue",
+        "arguing",
+        "confront",
+        "confrontation",
+        "loiter",
+        "tamper",
+        "tampering",
+        "door handle",
+        "trying door",
+        "suspicious",
+        "climb",
+        "climbing",
+        "trespass",
+        "trespassing",
+        "unauthorized",
+    ]
+    benign_keywords = [
+        "walking",
+        "stands",
+        "standing",
+        "sitting",
+        "talking",
+        "idle",
+        "nothing",
+        "empty",
+    ]
+
+    def contains_any(words):
+        return any(w in text for w in words)
+
+    # Direct high signals
+    if contains_any(high_keywords):
+        desired = "high"
+    elif contains_any(medium_keywords):
+        desired = "medium"
+    elif contains_any(benign_keywords):
+        desired = "low"
+    else:
+        desired = model_level or "low"
+
+    # De-escalate if caption explicitly indicates nothing happening
+    if (
+        any(
+            p in text
+            for p in ["no activity", "nothing happens", "no one", "empty scene"]
+        )
+        and desired != "low"
+    ):
+        desired = "low"
+
+    # If model gave high but we have only benign keywords
+    if (
+        model_level == "high"
+        and contains_any(benign_keywords)
+        and not contains_any(high_keywords + medium_keywords)
+    ):
+        desired = "low"
+
+    # Ensure valid
+    if desired not in {"low", "medium", "high"}:
+        desired = "low"
+    return desired
 
 
 def summarize_clip(
@@ -95,7 +193,7 @@ def summarize_clip(
                     "Rules:\n"
                     "1. State only directly observable visual events.\n"
                     "2. No guesses about identity, intent, emotions, causes.\n"
-                    "3. Exactly one short, neutral sentence; if no meaningful new event, caption is empty string.\n"
+                    "3. Exactly one short, neutral sentence.\n"
                     "4. No extra commentary, no markdown, no reasoning, no explanations.\n"
                     "5. Output MUST be valid minified JSON only.\n"
                     "6. If threat_level required, base it ONLY on visible actions per supplied scale.\n"
@@ -104,9 +202,14 @@ def summarize_clip(
             }
         ]
 
-        # Determine output format instructions
+        # Determine output format instructions (add explicit scale when threat assessment requested)
         if include_threat_assessment:
             output_format = (
+                "Threat scale (deterministic):\n"
+                "- high: Visible violence, weapon brandished/used, forced entry / active break-in, fire/explosion, person physically attacking, clear hazardous act (e.g., climbing high unstable structure), active vandalism/tampering of critical equipment.\n"
+                "- medium: Suspicious probing (trying door handles), loitering in restricted-looking area, unauthorized area access without force, object concealment gesture, minor property tampering (touching camera/lock), escalating confrontation (raised hands, aggressive posture) without confirmed physical contact.\n"
+                "- low: Routine benign activity (walking, idle standing, normal conversation, vehicles passing) or no meaningful event.\n"
+                "If ambiguous, choose the lower level. Do NOT infer intent.\n"
                 'Return JSON: {"caption":"<sentence or empty string>",'
                 '"threat_level":"low|medium|high"}. If no event, caption="" and threat_level="low".'
             )
@@ -137,7 +240,7 @@ def summarize_clip(
                     {
                         "text": (
                             safe_user_context
-                            + "Task: Analyze this surveillance segment and describe only meaningful new events. If none, caption is an empty string.\n"
+                            + "Task: Analyze this surveillance segment and describe only meaningful events.\n"
                             + output_format
                         )
                     },
@@ -211,8 +314,14 @@ def summarize_clip(
             },
         }
         if include_threat_assessment:
-            result["threat_level"] = threat_level
-            result["safe_user_context"] = safe_user_context
+            adjusted_level = threat_level
+            if USE_THREAT_HEURISTIC:
+                adjusted_level = _heuristic_adjust_threat(caption, threat_level)
+                if adjusted_level != threat_level:
+                    logger.warning(
+                        f"Threat heuristic adjusted level from {threat_level} -> {adjusted_level} (job={job_id}, segment={start_time})"
+                    )
+            result["threat_level"] = adjusted_level
         return result
 
     except Exception as e:
