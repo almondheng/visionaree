@@ -21,11 +21,11 @@
     </ChatHeader>
 
     <!-- Captions Area -->
-    <CardContent class="flex-1 flex flex-col min-h-0 p-0">
+    <CardContent class="flex-1 flex flex-col min-h-0 p-0 pb-4">
       <ScrollArea class="flex-1 p-4 min-h-0">
         <!-- Empty State -->
         <div
-          v-if="captions.length === 0"
+          v-if="sortedCaptions.length === 0"
           class="flex-1 flex flex-col items-center justify-center text-center p-6"
         >
           <div class="mb-6">
@@ -47,9 +47,9 @@
                 />
               </svg>
             </div>
-            <h4 class="font-medium text-sm mb-2">No captions yet</h4>
+            <h4 class="font-medium text-sm mb-2">No notable captions yet</h4>
             <p class="text-xs text-muted-foreground">
-              Start recording to see live captions
+              Only medium and high-threat content will appear here
             </p>
           </div>
         </div>
@@ -64,7 +64,19 @@
           >
             <div class="flex items-start gap-3">
               <div class="flex flex-col items-start gap-1">
-                <Badge variant="default" class="text-xs">
+                <Badge
+                  :variant="
+                    caption.threat_level === 'high' ? 'destructive' : 'default'
+                  "
+                  class="text-xs"
+                  :class="
+                    caption.threat_level === 'high'
+                      ? ''
+                      : caption.threat_level === 'medium'
+                      ? 'bg-amber-500'
+                      : 'bg-yellow-500'
+                  "
+                >
                   {{ formatTimestamp(caption.startTime) }}
                 </Badge>
               </div>
@@ -87,15 +99,6 @@
         </div>
       </ScrollArea>
     </CardContent>
-
-    <!-- Status Footer -->
-    <CardFooter class="p-4 border-t">
-      <div class="w-full text-center">
-        <p class="text-xs text-muted-foreground">
-          {{ statusText }}
-        </p>
-      </div>
-    </CardFooter>
   </Card>
 </template>
 
@@ -104,7 +107,7 @@ import { computed } from 'vue'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { ChatHeader } from '@/components/ui/chat'
-import { Card, CardContent, CardFooter } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { formatTimestamp } from '@/lib/utils'
 
 interface CaptionItem {
@@ -113,6 +116,7 @@ interface CaptionItem {
   caption?: string
   captionError?: string
   captionProcessing?: boolean
+  threat_level?: 'low' | 'medium' | 'high'
 }
 
 interface Props {
@@ -134,13 +138,10 @@ const emit = defineEmits<{
 const sortedCaptions = computed(() => {
   return [...props.captions]
     .filter(caption => caption.caption || caption.captionError)
+    .filter(
+      caption =>
+        caption.threat_level === 'medium' || caption.threat_level === 'high'
+    )
     .reverse()
-})
-
-const statusText = computed(() => {
-  const { total, processing, completed, failed } = props.processingStatus
-  if (total === 0) return 'No recordings yet'
-  if (processing > 0) return `Processing ${processing} of ${total} segments...`
-  return `${completed} segments processed, ${failed} failed`
 })
 </script>

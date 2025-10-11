@@ -347,6 +347,7 @@ interface VideoAnalysisResponse {
   filename: string
   file_size: number
   caption: string
+  threat_level?: 'low' | 'medium' | 'high'
   status: string
 }
 

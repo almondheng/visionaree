@@ -9,6 +9,7 @@ export interface RecordedChunk {
   caption?: string
   captionError?: string
   captionProcessing?: boolean
+  threat_level?: 'low' | 'medium' | 'high'
 }
 
 const DB_NAME = 'VisionareeDB'
@@ -101,6 +102,7 @@ export class WebcamRecorder {
     caption?: string
     captionError?: string
     captionProcessing?: boolean
+    threat_level?: 'low' | 'medium' | 'high'
   }> {
     const sorted = [...this.chunks].sort((a, b) => a.timestamp - b.timestamp)
     let accumulatedTime = 0
@@ -111,6 +113,7 @@ export class WebcamRecorder {
         caption: chunk.caption,
         captionError: chunk.captionError,
         captionProcessing: chunk.captionProcessing,
+        threat_level: chunk.threat_level,
       }
       accumulatedTime += chunk.duration
       return result
@@ -237,6 +240,7 @@ export class WebcamRecorder {
         caption: chunk.caption,
         captionError: chunk.captionError,
         captionProcessing: chunk.captionProcessing,
+        threat_level: chunk.threat_level,
       }
 
       await new Promise<void>((resolve, reject) => {
@@ -269,6 +273,7 @@ export class WebcamRecorder {
           const chunk = this.chunks[chunkIndex]
           if (chunk) {
             chunk.caption = response.caption
+            chunk.threat_level = response.threat_level
             chunk.captionProcessing = false
             delete chunk.captionError
             await this.saveChunkToIndexedDB(chunk)
