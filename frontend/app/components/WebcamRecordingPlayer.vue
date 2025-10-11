@@ -68,6 +68,10 @@ const props = defineProps<{
   totalDuration: number
 }>()
 
+const emit = defineEmits<{
+  'time-update': [time: number]
+}>()
+
 const videoPlayer = ref<HTMLVideoElement>()
 const currentTime = ref(0)
 const isPlaying = ref(false)
@@ -155,6 +159,7 @@ const appendNextChunk = async () => {
 const onTimeUpdate = () => {
   if (videoPlayer.value) {
     currentTime.value = videoPlayer.value.currentTime
+    emit('time-update', currentTime.value)
   }
 }
 
@@ -255,8 +260,20 @@ const seekTo = (time: number) => {
   }
 }
 
+const play = async () => {
+  if (!videoPlayer.value) return
+
+  try {
+    await videoPlayer.value.play()
+    isPlaying.value = true
+  } catch (e) {
+    console.warn('Play failed:', e)
+  }
+}
+
 defineExpose({
   seekTo,
+  play,
 })
 
 onBeforeUnmount(() => {

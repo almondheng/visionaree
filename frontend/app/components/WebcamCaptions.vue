@@ -1,10 +1,7 @@
 <template>
-  <Card class="h-full max-h-[600px] flex flex-col pb-0 gap-0">
+  <Card class="h-full flex flex-col pb-0 gap-0">
     <!-- Chat Header -->
-    <ChatHeader
-      title="Live Captions"
-      description="Real-time video analysis"
-    >
+    <ChatHeader title="Live Captions" description="Real-time video analysis">
       <template #icon>
         <svg
           xmlns="http://www.w3.org/2000/svg"
@@ -25,7 +22,7 @@
 
     <!-- Captions Area -->
     <CardContent class="flex-1 flex flex-col min-h-0 p-0">
-      <ScrollArea class="flex-1 p-4 h-[340px]">
+      <ScrollArea class="flex-1 p-4 min-h-0">
         <!-- Empty State -->
         <div
           v-if="captions.length === 0"
@@ -72,27 +69,13 @@
                 </Badge>
               </div>
               <div class="flex-1 min-w-0">
-                <div v-if="caption.captionProcessing" class="flex items-center gap-2 text-muted-foreground">
-                  <div class="flex space-x-1">
-                    <div
-                      class="w-2 h-2 bg-current rounded-full animate-bounce"
-                      style="animation-delay: 0ms"
-                    ></div>
-                    <div
-                      class="w-2 h-2 bg-current rounded-full animate-bounce"
-                      style="animation-delay: 150ms"
-                    ></div>
-                    <div
-                      class="w-2 h-2 bg-current rounded-full animate-bounce"
-                      style="animation-delay: 300ms"
-                    ></div>
-                  </div>
-                  <span class="text-sm">Processing...</span>
-                </div>
-                <p v-else-if="caption.caption" class="text-sm leading-relaxed">
+                <p v-if="caption.caption" class="text-sm leading-relaxed">
                   {{ caption.caption }}
                 </p>
-                <p v-else-if="caption.captionError" class="text-sm text-red-500">
+                <p
+                  v-else-if="caption.captionError"
+                  class="text-sm text-red-500"
+                >
                   Error: {{ caption.captionError }}
                 </p>
                 <p v-else class="text-sm text-muted-foreground">
@@ -121,11 +104,7 @@ import { computed } from 'vue'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { ChatHeader } from '@/components/ui/chat'
-import {
-  Card,
-  CardContent,
-  CardFooter,
-} from '@/components/ui/card'
+import { Card, CardContent, CardFooter } from '@/components/ui/card'
 import { formatTimestamp } from '@/lib/utils'
 
 interface CaptionItem {
@@ -154,7 +133,7 @@ const emit = defineEmits<{
 
 const sortedCaptions = computed(() => {
   return [...props.captions]
-    .filter(caption => caption.caption || caption.captionError || caption.captionProcessing)
+    .filter(caption => caption.caption || caption.captionError)
     .reverse()
 })
 

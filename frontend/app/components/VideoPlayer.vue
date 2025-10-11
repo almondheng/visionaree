@@ -19,7 +19,7 @@
           @canplay="onCanPlay"
           @play="onPlay"
           @pause="onPause"
-          @click="togglePlayPause"
+          @click="!isWebcam ? togglePlayPause() : undefined"
         >
           Your browser does not support the video tag.
         </video>
